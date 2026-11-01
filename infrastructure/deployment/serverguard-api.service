@@ -1,0 +1,23 @@
+[Unit]
+Description=ServerGuard private pilot API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=serverguard
+Group=serverguard
+WorkingDirectory=/opt/serverguard/current
+EnvironmentFile=/etc/serverguard/control-plane.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/serverguard/current/apps/api/dist/main.js
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

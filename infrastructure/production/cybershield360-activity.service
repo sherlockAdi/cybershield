@@ -1,0 +1,28 @@
+[Unit]
+Description=CyberShield360 approved SSH TCP ICMP metadata collector
+After=network.target
+
+[Service]
+Type=simple
+User=root
+StateDirectory=cybershield360-activity
+StateDirectoryMode=0700
+ExecStart=/usr/bin/python3 /usr/local/lib/cybershield360/activity_collector.py
+Restart=on-failure
+RestartSec=15
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/cybershield360-agent/activity-spool
+CapabilityBoundingSet=CAP_NET_RAW CAP_DAC_OVERRIDE CAP_CHOWN
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+MemoryMax=128M
+CPUQuota=10%
+
+[Install]
+WantedBy=multi-user.target

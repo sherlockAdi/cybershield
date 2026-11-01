@@ -1,0 +1,15 @@
+ALTER TABLE organizations ADD COLUMN detection_config jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE incidents ADD COLUMN server_id uuid;
+ALTER TABLE incidents ADD COLUMN rule_key varchar(80);
+ALTER TABLE incidents ADD COLUMN deduplication_key char(64);
+ALTER TABLE incidents ADD CONSTRAINT incidents_server_identity_fk FOREIGN KEY(organization_id,server_id) REFERENCES servers(organization_id,id) ON DELETE RESTRICT;
+CREATE UNIQUE INDEX incidents_detection_dedupe_key ON incidents(organization_id,deduplication_key);
+CREATE INDEX incidents_rule_time_idx ON incidents(organization_id,rule_key,created_at);
+ALTER TABLE notifications ADD COLUMN payload jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE notifications ADD COLUMN read_by uuid[] NOT NULL DEFAULT '{}';
+ALTER TABLE notifications ADD COLUMN sent_at timestamptz(3);
+CREATE INDEX notifications_inbox_idx ON notifications(organization_id,created_at DESC,id DESC);
+ALTER TABLE outbox_events ADD COLUMN next_attempt_at timestamptz(3);
+ALTER TABLE outbox_events ADD COLUMN last_error varchar(80);
+CREATE INDEX detection_outbox_pending_idx ON outbox_events(topic,published_at,next_attempt_at);
+CREATE INDEX auth_correlation_idx ON security_events(organization_id,server_id,kind,received_at DESC) WHERE kind IN ('AUTH_FAILURE','AUTH_SUCCESS');

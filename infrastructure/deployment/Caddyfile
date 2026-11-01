@@ -1,0 +1,5 @@
+{$PILOT_HOST} {
+    @outsidePilot not remote_ip {$PILOT_CIDR}
+    respond @outsidePilot "Private pilot access only" 403
+    reverse_proxy 127.0.0.1:3100
+}

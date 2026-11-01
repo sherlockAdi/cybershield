@@ -1,0 +1,13 @@
+packages:
+  - apps/*
+  - packages/*
+  - services/*
+allowBuilds:
+  '@prisma/client': true
+  '@prisma/engines': true
+  esbuild: true
+  prisma: true
+  sharp: true
+  '@swc/core': true
+minimumReleaseAgeExclude:
+  - '@electric-sql/pglite@0.5.13'

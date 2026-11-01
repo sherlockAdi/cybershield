@@ -1,0 +1,28 @@
+[Unit]
+Description=CyberShield360 signed host inventory agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=cybershield360-agent
+Group=cybershield360-agent
+StateDirectory=cybershield360-agent
+StateDirectoryMode=0700
+EnvironmentFile=/var/lib/cybershield360-agent/agent.env
+ExecStart=/usr/local/lib/cybershield360/serverguard-agent --api ${AGENT_API} --server-id ${SERVER_ID} --token-file /var/lib/cybershield360-agent/enrollment.token --state-dir /var/lib/cybershield360-agent --events-dir /var/lib/cybershield360-agent/activity-spool
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

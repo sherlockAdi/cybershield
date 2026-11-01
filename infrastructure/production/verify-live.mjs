@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+const credentials = JSON.parse(fs.readFileSync('/provisioning/admin-access.json', 'utf8'));
+const origin = 'https://cybershield360.vvvitsolutions.online';
+const response = await fetch(`${origin}/api/auth/login`, { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ email: credentials.email, password: credentials.password }) });
+const login = await response.json();
+if (!response.ok || !login.mfaRequired) throw new Error('Expected successful login requiring initial MFA setup');
+const cookies = new Map(response.headers.getSetCookie().map(cookie => cookie.split(';')[0].split('=')));
+const cookie = [...cookies].map(([name, value]) => `${name}=${value}`).join('; ');
+const inventory = await fetch(`${origin}/api/organizations/${credentials.organizationId}/inventory`, { headers: { Cookie: cookie } });
+if (inventory.status !== 403) throw new Error('Inventory must remain blocked until MFA is completed');
+const logout = await fetch(`${origin}/api/auth/logout`, { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', Cookie: cookie, 'X-CSRF-Token': cookies.get('sg_csrf') }, body: '{}' });
+if (!logout.ok) throw new Error('Verification session cleanup failed');
+process.stdout.write(JSON.stringify({ loginVerified: true, initialMfaRequired: true, inventoryBlockedUntilMfa: true, verificationSessionRevoked: true, credentialsPrinted: false }) + '\n');

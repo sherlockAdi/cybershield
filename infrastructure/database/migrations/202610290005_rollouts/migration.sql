@@ -1,0 +1,15 @@
+ALTER TABLE policy_deployments ADD COLUMN mode varchar(20) NOT NULL DEFAULT 'SIMULATION' CHECK (mode='SIMULATION');
+ALTER TABLE policy_deployments ADD COLUMN batch_size integer NOT NULL DEFAULT 2 CHECK (batch_size BETWEEN 1 AND 10);
+ALTER TABLE policy_deployments ADD COLUMN canary_timeout_seconds integer NOT NULL DEFAULT 300 CHECK (canary_timeout_seconds BETWEEN 30 AND 600);
+ALTER TABLE policy_deployments ADD COLUMN stage_deadline_at timestamptz(3);
+ALTER TABLE policy_deployments ADD COLUMN last_reconciled_at timestamptz(3);
+ALTER TABLE deployment_targets ADD COLUMN dispatch_deadline_at timestamptz(3);
+ALTER TABLE deployment_targets ADD COLUMN watchdog_deadline_at timestamptz(3);
+ALTER TABLE deployment_targets ADD COLUMN confirmed_at timestamptz(3);
+ALTER TABLE deployment_targets ADD COLUMN verification_evidence jsonb;
+ALTER TABLE deployment_targets ADD COLUMN simulation_online boolean NOT NULL DEFAULT true;
+ALTER TABLE deployment_targets ADD COLUMN simulation_failure varchar(20) NOT NULL DEFAULT 'NONE' CHECK (simulation_failure IN ('NONE','APPLY','VERIFY','ROLLBACK'));
+ALTER TABLE servers ADD COLUMN simulation_firewall_state jsonb NOT NULL DEFAULT '{"hash":null,"versionId":null}'::jsonb;
+CREATE INDEX rollout_reconciliation_idx ON policy_deployments(state,last_reconciled_at);
+CREATE INDEX rollout_target_state_idx ON deployment_targets(organization_id,deployment_id,state);
+CREATE INDEX rollout_job_target_idx ON agent_jobs(organization_id,target_id,operation);

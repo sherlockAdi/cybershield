@@ -1,0 +1,27 @@
+[Unit]
+Description=ServerGuard heartbeat agent prototype
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=serverguard
+Group=serverguard
+StateDirectory=serverguard-agent
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/local/bin/serverguard-agent --api https://control.example.com --server-id REPLACE_SERVER_UUID --token-file /etc/serverguard/enrollment.token --state-dir /var/lib/serverguard-agent
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

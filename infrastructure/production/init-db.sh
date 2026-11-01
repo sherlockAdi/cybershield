@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --set=migrator_password="$MIGRATOR_PASSWORD" --set=runtime_password="$RUNTIME_PASSWORD" <<'SQL'
+CREATE ROLE cyber_migrator LOGIN PASSWORD :'migrator_password' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+CREATE ROLE cyber_runtime LOGIN PASSWORD :'runtime_password' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+ALTER DATABASE cybershield360 OWNER TO cyber_migrator;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE,CREATE ON SCHEMA public TO cyber_migrator;
+GRANT USAGE ON SCHEMA public TO cyber_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE cyber_migrator IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO cyber_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE cyber_migrator IN SCHEMA public GRANT USAGE,SELECT ON SEQUENCES TO cyber_runtime;
+SQL

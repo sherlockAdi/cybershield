@@ -1,0 +1,542 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+enum OperatingSystem {
+  LINUX
+  WINDOWS
+}
+
+enum RuleAction {
+  ALLOW
+  BLOCK
+}
+
+enum Direction {
+  INBOUND
+  OUTBOUND
+}
+
+enum Protocol {
+  TCP
+  UDP
+  ICMP
+}
+
+enum PolicyState {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SUPERSEDED
+}
+
+enum DeploymentState {
+  PENDING_APPROVAL
+  QUEUED
+  CANARY
+  ROLLING_OUT
+  PAUSED
+  SUCCEEDED
+  FAILED
+  ROLLING_BACK
+  ROLLED_BACK
+  CANCELLED
+}
+
+enum TargetState {
+  PENDING
+  DISPATCHED
+  APPLIED
+  VERIFIED
+  FAILED
+  UNKNOWN
+  ROLLING_BACK
+  ROLLED_BACK
+  ROLLBACK_FAILED
+  CANCELLED
+}
+
+enum ApprovalState {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum Severity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentState {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+}
+
+enum JobState {
+  PENDING
+  LEASED
+  SUCCEEDED
+  FAILED
+  EXPIRED
+}
+
+enum DeliveryState {
+  PENDING
+  SENT
+  FAILED
+}
+
+model Organization {
+  detection_config Json @default("{}")
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String   @db.VarChar(120)
+  created_at    DateTime @default(now()) @db.Timestamptz(3)
+  updated_at    DateTime @updatedAt @db.Timestamptz(3)
+  memberships   Membership[]
+  invitations   Invitation[]
+  servers       Server[]
+  groups        ServerGroup[]
+  enrollment    EnrollmentToken[]
+  policies      FirewallPolicy[]
+  deployments   PolicyDeployment[]
+  events        SecurityEvent[]
+  incidents     Incident[]
+  audits        AuditLog[]
+  notifications Notification[]
+  outbox        OutboxEvent[]
+  metric_samples MetricSample[]
+  @@map("organizations")
+}
+
+model User {
+  id                  String   @id @default(uuid()) @db.Uuid
+  email               String   @unique @db.VarChar(254)
+  name                String   @db.VarChar(100)
+  password_hash       String
+  disabled_at         DateTime? @db.Timestamptz(3)
+  mfa_secret_encrypted String?
+  mfa_pending_encrypted String?
+  mfa_enabled         Boolean  @default(false)
+  mfa_last_step       BigInt   @default(-1)
+  created_at          DateTime @default(now()) @db.Timestamptz(3)
+  memberships         Membership[]
+  sessions            Session[]
+  recovery_codes      RecoveryCode[]
+  audits              AuditLog[]
+  issued_invitations  Invitation[] @relation("InvitationIssuer")
+  enrollment_tokens   EnrollmentToken[] @relation("EnrollmentCreator")
+  policy_versions     PolicyVersion[] @relation("PolicyCreator")
+  requested_deployments PolicyDeployment[] @relation("DeploymentRequester")
+  requested_approvals  ApprovalRequest[] @relation("ApprovalRequester")
+  decided_approvals    ApprovalRequest[] @relation("ApprovalApprover")
+  @@map("users")
+}
+
+model Membership {
+  organization_id String @db.Uuid
+  user_id         String @db.Uuid
+  role            Role
+  created_at      DateTime @default(now()) @db.Timestamptz(3)
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  user            User @relation(fields: [user_id], references: [id], onDelete: Restrict)
+  @@id([organization_id, user_id])
+  @@index([user_id])
+  @@map("memberships")
+}
+
+model Session {
+  id                String @id @default(uuid()) @db.Uuid
+  user_id           String @db.Uuid
+  family_id         String @db.Uuid
+  access_hash       String @unique @db.Char(64)
+  refresh_hash      String @unique @db.Char(64)
+  csrf_hash         String @db.Char(64)
+  mfa_verified      Boolean @default(false)
+  access_expires_at DateTime @db.Timestamptz(3)
+  expires_at        DateTime @db.Timestamptz(3)
+  consumed_at       DateTime? @db.Timestamptz(3)
+  revoked_at        DateTime? @db.Timestamptz(3)
+  created_at        DateTime @default(now()) @db.Timestamptz(3)
+  user              User @relation(fields: [user_id], references: [id], onDelete: Restrict)
+  @@index([family_id])
+  @@index([user_id, expires_at])
+  @@map("sessions")
+}
+
+model RecoveryCode {
+  id         String @id @default(uuid()) @db.Uuid
+  user_id    String @db.Uuid
+  code_hash  String @unique @db.Char(64)
+  used_at    DateTime? @db.Timestamptz(3)
+  user       User @relation(fields: [user_id], references: [id], onDelete: Restrict)
+  @@index([user_id])
+  @@map("mfa_recovery_codes")
+}
+
+model Invitation {
+  id              String @id @default(uuid()) @db.Uuid
+  organization_id String @db.Uuid
+  email           String @db.VarChar(254)
+  role            Role
+  token_hash      String @unique @db.Char(64)
+  invited_by      String @db.Uuid
+  expires_at      DateTime @db.Timestamptz(3)
+  accepted_at     DateTime? @db.Timestamptz(3)
+  revoked_at      DateTime? @db.Timestamptz(3)
+  created_at      DateTime @default(now()) @db.Timestamptz(3)
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  issuer          User @relation("InvitationIssuer", fields: [invited_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "invitations_issuer_fk")
+  @@index([organization_id, email])
+  @@map("invitations")
+}
+
+model Server {
+  incidents Incident[]
+  id                  String @id @default(uuid()) @db.Uuid
+  organization_id     String @db.Uuid
+  hostname            String @db.VarChar(253)
+  os                  OperatingSystem
+  os_version          String?
+  agent_version       String?
+  last_heartbeat_at   DateTime? @db.Timestamptz(3)
+  decommissioned_at   DateTime? @db.Timestamptz(3)
+  labels              Json @default("{}")
+  capabilities        Json @default("{}")
+  observed_checksum   String? @db.Char(64)
+  simulation_firewall_state Json @default("{\"hash\":null,\"versionId\":null}")
+  observed_version    Int?
+  uptime_seconds      BigInt?
+  architecture        String? @db.VarChar(32)
+  logical_cpu_count   Int?
+  created_at          DateTime @default(now()) @db.Timestamptz(3)
+  organization        Organization @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  groups              ServerGroupMember[]
+  credentials         AgentCredential[]
+  enrollment          EnrollmentToken[]
+  targets             DeploymentTarget[]
+  events              SecurityEvent[]
+  metric_samples      MetricSample[]
+  @@unique([organization_id, id])
+  @@index([organization_id, last_heartbeat_at])
+  @@map("servers")
+}
+
+model ServerGroup {
+  id              String @id @default(uuid()) @db.Uuid
+  organization_id String @db.Uuid
+  name            String @db.VarChar(120)
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  members         ServerGroupMember[]
+  @@unique([organization_id, id])
+  @@unique([organization_id, name])
+  @@map("server_groups")
+}
+
+model ServerGroupMember {
+  organization_id String @db.Uuid
+  group_id        String @db.Uuid
+  server_id       String @db.Uuid
+  group           ServerGroup @relation(fields: [organization_id, group_id], references: [organization_id, id], onDelete: Restrict)
+  server          Server @relation(fields: [organization_id, server_id], references: [organization_id, id], onDelete: Restrict)
+  @@id([organization_id, group_id, server_id])
+  @@map("server_group_members")
+}
+
+model AgentCredential {
+  id                      String @id @default(uuid()) @db.Uuid
+  organization_id         String @db.Uuid
+  server_id               String @db.Uuid
+  certificate_fingerprint String? @unique @db.Char(64)
+  certificate_serial      String? @unique
+  public_key_pem          String?
+  key_fingerprint         String? @unique @db.Char(64)
+  last_sequence           BigInt @default(0)
+  expires_at              DateTime @db.Timestamptz(3)
+  revoked_at              DateTime? @db.Timestamptz(3)
+  created_at              DateTime @default(now()) @db.Timestamptz(3)
+  server                  Server @relation(fields: [organization_id, server_id], references: [organization_id, id], onDelete: Restrict)
+  enrollment              EnrollmentToken[]
+  metric_samples          MetricSample[]
+  @@unique([organization_id, id])
+  @@index([organization_id, server_id])
+  @@unique([organization_id, server_id, id], map: "agent_credentials_server_identity_key")
+  @@map("agent_credentials")
+}
+
+model EnrollmentToken {
+  id              String @id @default(uuid()) @db.Uuid
+  organization_id String @db.Uuid
+  server_id       String @db.Uuid
+  token_hash      String @unique @db.Char(64)
+  created_by      String @db.Uuid
+  expires_at      DateTime @db.Timestamptz(3)
+  consumed_at     DateTime? @db.Timestamptz(3)
+  revoked_at      DateTime? @db.Timestamptz(3)
+  credential_id   String? @db.Uuid
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  server          Server @relation(fields: [organization_id, server_id], references: [organization_id, id], onDelete: Restrict)
+  creator         User @relation("EnrollmentCreator", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "enrollment_tokens_creator_fk")
+  credential      AgentCredential? @relation(fields: [organization_id, credential_id], references: [organization_id, id], onDelete: Restrict)
+  @@map("enrollment_tokens")
+}
+
+model FirewallPolicy {
+  id              String @id @default(uuid()) @db.Uuid
+  organization_id String @db.Uuid
+  name            String @db.VarChar(120)
+  created_at      DateTime @default(now()) @db.Timestamptz(3)
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  versions        PolicyVersion[]
+  @@unique([organization_id, id])
+  @@map("firewall_policies")
+}
+
+model PolicyVersion {
+  id              String @id @default(uuid()) @db.Uuid
+  organization_id String @db.Uuid
+  policy_id       String @db.Uuid
+  version         Int
+  state           PolicyState @default(DRAFT)
+  checksum        String? @db.Char(64)
+  target          Json
+  created_by      String @db.Uuid
+  sealed_at       DateTime? @db.Timestamptz(3)
+  created_at      DateTime @default(now()) @db.Timestamptz(3)
+  policy          FirewallPolicy @relation(fields: [organization_id, policy_id], references: [organization_id, id], onDelete: Restrict)
+  rules           FirewallRule[]
+  deployments     PolicyDeployment[]
+  creator         User @relation("PolicyCreator", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "policy_versions_creator_fk")
+  @@unique([organization_id, id])
+  @@unique([organization_id, policy_id, version])
+  @@map("policy_versions")
+}
+
+model FirewallRule {
+  id                String @id @default(uuid()) @db.Uuid
+  organization_id   String @db.Uuid
+  policy_version_id String @db.Uuid
+  cidr              String @db.Inet
+  action            RuleAction
+  direction         Direction
+  protocol          Protocol
+  port_start        Int?
+  port_end          Int?
+  expires_at        DateTime? @db.Timestamptz(3)
+  reason            String @db.VarChar(1000)
+  version           PolicyVersion @relation(fields: [organization_id, policy_version_id], references: [organization_id, id], onDelete: Restrict)
+  @@index([organization_id, policy_version_id])
+  @@map("firewall_rules")
+}
+
+model PolicyDeployment {
+  id                String @id @default(uuid()) @db.Uuid
+  organization_id   String @db.Uuid
+  policy_version_id String @db.Uuid
+  state             DeploymentState @default(PENDING_APPROVAL)
+  target_checksum   String @db.Char(64)
+  requested_by      String @db.Uuid
+  created_at        DateTime @default(now()) @db.Timestamptz(3)
+  completed_at      DateTime? @db.Timestamptz(3)
+  mode              String @default("SIMULATION") @db.VarChar(20)
+  batch_size        Int @default(2)
+  canary_timeout_seconds Int @default(300)
+  stage_deadline_at  DateTime? @db.Timestamptz(3)
+  last_reconciled_at DateTime? @db.Timestamptz(3)
+  organization      Organization @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  version           PolicyVersion @relation(fields: [organization_id, policy_version_id], references: [organization_id, id], onDelete: Restrict)
+  approval          ApprovalRequest?
+  requester         User @relation("DeploymentRequester", fields: [requested_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "policy_deployments_requester_fk")
+  targets           DeploymentTarget[]
+  @@unique([organization_id, id])
+  @@index([organization_id, created_at])
+  @@map("policy_deployments")
+}
+
+model ApprovalRequest {
+  id              String @id @default(uuid()) @db.Uuid
+  organization_id String @db.Uuid
+  deployment_id   String @unique @db.Uuid
+  requester_id    String @db.Uuid
+  approver_id     String? @db.Uuid
+  state           ApprovalState @default(PENDING)
+  reason          String? @db.VarChar(1000)
+  expires_at      DateTime @db.Timestamptz(3)
+  decided_at      DateTime? @db.Timestamptz(3)
+  deployment      PolicyDeployment @relation(fields: [organization_id, deployment_id], references: [organization_id, id], onDelete: Restrict)
+  requester       User @relation("ApprovalRequester", fields: [requester_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "approval_requests_requester_fk")
+  approver        User? @relation("ApprovalApprover", fields: [approver_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "approval_requests_approver_fk")
+  @@unique([organization_id, deployment_id])
+  @@index([organization_id, state])
+  @@map("approval_requests")
+}
+
+model DeploymentTarget {
+  id              String @id @default(uuid()) @db.Uuid
+  organization_id String @db.Uuid
+  deployment_id   String @db.Uuid
+  server_id       String @db.Uuid
+  state           TargetState @default(PENDING)
+  is_canary       Boolean @default(false)
+  error_code      String?
+  observed_hash   String? @db.Char(64)
+  verified_at     DateTime? @db.Timestamptz(3)
+  rollback_state  Json?
+  dispatch_deadline_at DateTime? @db.Timestamptz(3)
+  watchdog_deadline_at DateTime? @db.Timestamptz(3)
+  confirmed_at DateTime? @db.Timestamptz(3)
+  verification_evidence Json?
+  simulation_online Boolean @default(true)
+  simulation_failure String @default("NONE") @db.VarChar(20)
+  deployment      PolicyDeployment @relation(fields: [organization_id, deployment_id], references: [organization_id, id], onDelete: Restrict)
+  server          Server @relation(fields: [organization_id, server_id], references: [organization_id, id], onDelete: Restrict)
+  jobs            AgentJob[]
+  @@unique([organization_id, id])
+  @@unique([deployment_id, server_id])
+  @@map("deployment_targets")
+}
+
+model AgentJob {
+  id              String @id @default(uuid()) @db.Uuid
+  organization_id String @db.Uuid
+  target_id       String @db.Uuid
+  idempotency_key String @unique
+  operation       String @db.VarChar(40)
+  payload         Json
+  state           JobState @default(PENDING)
+  attempts        Int @default(0)
+  lease_until     DateTime? @db.Timestamptz(3)
+  expires_at      DateTime @db.Timestamptz(3)
+  result          Json?
+  created_at      DateTime @default(now()) @db.Timestamptz(3)
+  target          DeploymentTarget @relation(fields: [organization_id, target_id], references: [organization_id, id], onDelete: Restrict)
+  @@index([state, lease_until])
+  @@map("agent_jobs")
+}
+
+model SecurityEvent {
+  id              String @id @default(uuid()) @db.Uuid
+  organization_id String @db.Uuid
+  server_id       String @db.Uuid
+  source_event_id String
+  schema_version  Int @default(1)
+  kind            String @db.VarChar(80)
+  severity        Severity
+  occurred_at     DateTime @db.Timestamptz(3)
+  received_at     DateTime @default(now()) @db.Timestamptz(3)
+  payload         Json
+  event_hash      String? @db.Char(64)
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  server          Server @relation(fields: [organization_id, server_id], references: [organization_id, id], onDelete: Restrict)
+  @@unique([organization_id, server_id, source_event_id])
+  @@index([organization_id, occurred_at])
+  @@index([organization_id, received_at, id])
+  @@index([organization_id, server_id, received_at])
+  @@map("security_events")
+}
+
+model MetricSample {
+  id                 String @id @default(uuid()) @db.Uuid
+  organization_id    String @db.Uuid
+  server_id          String @db.Uuid
+  credential_id      String @db.Uuid
+  sequence           BigInt
+  cpu_percent        Float?
+  memory_total_bytes BigInt?
+  memory_used_bytes  BigInt?
+  disk_total_bytes   BigInt?
+  disk_used_bytes    BigInt?
+  sampled_at         DateTime @db.Timestamptz(3)
+  received_at        DateTime @default(now()) @db.Timestamptz(3)
+  organization       Organization @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  server             Server @relation(fields: [organization_id, server_id], references: [organization_id, id], onDelete: Restrict)
+  credential         AgentCredential @relation(fields: [organization_id, server_id, credential_id], references: [organization_id, server_id, id], onDelete: Restrict, map: "metric_samples_identity_fkey")
+  @@unique([credential_id, sequence])
+  @@index([organization_id, server_id, received_at])
+  @@index([organization_id, received_at])
+  @@map("metric_samples")
+}
+
+model Incident {
+  id              String @id @default(uuid()) @db.Uuid
+  organization_id String @db.Uuid
+  title           String @db.VarChar(250)
+  severity        Severity
+  state           IncidentState @default(OPEN)
+  evidence        Json
+  created_at      DateTime @default(now()) @db.Timestamptz(3)
+  resolved_at     DateTime? @db.Timestamptz(3)
+  server_id       String? @db.Uuid
+  rule_key        String? @db.VarChar(80)
+  deduplication_key String? @db.Char(64)
+  server          Server? @relation(fields: [organization_id, server_id], references: [organization_id, id], onDelete: Restrict)
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  @@index([organization_id, state, created_at])
+  @@unique([organization_id, deduplication_key])
+  @@index([organization_id, rule_key, created_at])
+  @@map("incidents")
+}
+
+model AuditLog {
+  id              String @id @default(uuid()) @db.Uuid
+  organization_id String @db.Uuid
+  actor_id        String? @db.Uuid
+  action          String @db.VarChar(100)
+  resource_id     String?
+  request_id      String @db.Uuid
+  metadata        Json @default("{}")
+  created_at      DateTime @default(now()) @db.Timestamptz(3)
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  actor           User? @relation(fields: [actor_id], references: [id], onDelete: Restrict)
+  @@index([organization_id, created_at, id])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id              String @id @default(uuid()) @db.Uuid
+  organization_id String @db.Uuid
+  deduplication_key String @unique
+  channel         String @db.VarChar(20)
+  destination_ref String
+  state           DeliveryState @default(PENDING)
+  attempts        Int @default(0)
+  next_attempt_at DateTime? @db.Timestamptz(3)
+  created_at      DateTime @default(now()) @db.Timestamptz(3)
+  payload         Json @default("{}")
+  read_by         String[] @default([]) @db.Uuid
+  sent_at         DateTime? @db.Timestamptz(3)
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  @@index([state, next_attempt_at])
+  @@map("notifications")
+}
+
+model OutboxEvent {
+  id              String @id @default(uuid()) @db.Uuid
+  organization_id String @db.Uuid
+  topic           String @db.VarChar(80)
+  payload         Json
+  created_at      DateTime @default(now()) @db.Timestamptz(3)
+  published_at    DateTime? @db.Timestamptz(3)
+  attempts        Int @default(0)
+  next_attempt_at DateTime? @db.Timestamptz(3)
+  last_error      String? @db.VarChar(80)
+  organization    Organization @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  @@index([published_at, created_at])
+  @@map("outbox_events")
+}

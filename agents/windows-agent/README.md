@@ -1,0 +1,3 @@
+# Windows agent
+
+.NET 10 Worker/Windows Service prototype (`ServerGuardAgent`) with signed outbound enrollment, heartbeats, DPAPI CurrentUser-protected keys, restricted state ACLs and flushed sequences. No firewall/shell/job execution. Build using the project NuGet.Config and `dotnet build -c Release`. See [installation](../../docs/agent-guide.md), [protocol](../../docs/agent-protocol.md) and [verification](../../docs/week-3-checklist.md). Foreground enrollment/restart is tested on this Windows host; SCM installation and Windows Server VM validation remain separate gates.

@@ -1,0 +1,23 @@
+[Unit]
+Description=ServerGuard private pilot dashboard
+After=network-online.target serverguard-api.service
+Wants=serverguard-api.service
+
+[Service]
+Type=simple
+User=serverguard
+Group=serverguard
+WorkingDirectory=/opt/serverguard/current/apps/dashboard
+Environment=NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
+ExecStart=/usr/bin/node /opt/serverguard/current/apps/dashboard/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3100
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/serverguard/current/apps/dashboard/.next/cache
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

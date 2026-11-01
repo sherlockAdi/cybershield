@@ -1,0 +1,61 @@
+name: cybershield360
+services:
+  db:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: cyber_bootstrap
+      POSTGRES_DB: cybershield360
+      POSTGRES_PASSWORD: ${DB_BOOTSTRAP_PASSWORD:?required}
+      MIGRATOR_PASSWORD: ${DB_MIGRATOR_PASSWORD:?required}
+      RUNTIME_PASSWORD: ${DB_RUNTIME_PASSWORD:?required}
+    volumes:
+      - database:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/10-cybershield.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U cyber_bootstrap -d cybershield360"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1
+    networks: [private]
+  app:
+    image: cybershield360:pilot-1
+    environment:
+      NODE_ENV: production
+      API_BIND_HOST: 0.0.0.0
+      DASHBOARD_BIND_HOST: 0.0.0.0
+      APP_ORIGIN: https://cybershield360.vvvitsolutions.online
+      DATABASE_URL: postgresql://cyber_runtime:${DB_RUNTIME_PASSWORD}@db:5432/cybershield360
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?required}
+      ALLOW_REGISTRATION: "false"
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - 127.0.0.1:13100:3100
+      - 127.0.0.1:14100:4100
+    depends_on:
+      db:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=128m
+      - /app/apps/dashboard/.next/cache:uid=1000,gid=1000,mode=0700,size=128m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1024m
+    cpus: 2
+    restart: unless-stopped
+    networks: [private]
+  migrate:
+    image: cybershield360:pilot-1
+    profiles: [tools]
+    environment:
+      DATABASE_URL: postgresql://cyber_migrator:${DB_MIGRATOR_PASSWORD}@db:5432/cybershield360
+    command: [node, scripts/run.mjs, "db:deploy"]
+    networks: [private]
+    mem_limit: 512m
+networks:
+  private:
+volumes:
+  database:

@@ -1,0 +1,11 @@
+# Server details and daily activity
+
+Click a registered server row or its hostname to open the right-hand details drawer. It occupies half the desktop viewport and the full viewport on screens up to 900px. Escape, the close button, or the backdrop closes it; keyboard focus returns to the trigger.
+
+The drawer includes identity, operating system, agent credential expiry, heartbeat, uptime, health charts, events, labels/groups, and daily activity. Daily windows begin at midnight Asia/Kolkata. Counts and up to 100 peers, login records, and connection observations refresh every ten seconds. The activity API requires an authenticated, MFA-complete organization member and verifies server ownership.
+
+On the approved live Linux host, a separate root metadata helper reads retained SSH journal records, samples established TCP connections every 30 seconds, and passively counts kernel-delivered IPv4/IPv6 ICMP echo requests. It never sends probes or saves packet contents. Authentication methods other than supported SSH password/public-key log lines are not currently collected. TCP snapshots can miss short connections. Retention, downtime, overload, or incomplete backfill can leave gaps; coverage indicators describe each source. Historical ping counts cannot be reconstructed. Other hosts require their own approved collector; missing coverage is shown as unavailable.
+
+The helper runs as `cybershield360-activity.service` with NET_RAW, DAC_OVERRIDE and CHOWN capabilities, a read-only system filesystem and bounded CPU/memory. It owns `/var/lib/cybershield360-activity` and publishes bounded immutable batches into the agent's private activity spool. The unprivileged signed agent consumes `--events-dir /var/lib/cybershield360-agent/activity-spool`, retaining each batch until its signed API acknowledgement. Restart retries use stable event identifiers for deduplication. No signing key is given to the helper.
+
+Inspect service status and source coverage after installation. Stop the activity service to stop collection. Preserve existing agent identity/state during upgrades; never re-enroll simply to enable this feed. Process telemetry and Windows event collection remain separate opt-in integrations.

@@ -1,0 +1,27 @@
+{
+  "name": "serverguard-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ServerGuard AI security control plane",
+  "packageManager": "pnpm@11.25.0",
+  "engines": { "node": ">=22 <25", "pnpm": ">=11 <12" },
+  "scripts": {
+    "backup": "node scripts/backup.mjs",
+    "release:create": "node scripts/package-release.mjs create",
+    "release:verify": "node scripts/package-release.mjs verify",
+    "deploy:check": "node scripts/deployment-check.mjs",
+    "dev": "node scripts/run.mjs dev",
+    "build": "node scripts/run.mjs build",
+    "start": "node scripts/run.mjs start",
+    "check": "node scripts/run.mjs check",
+    "test": "node scripts/run.mjs test",
+    "db:validate": "node scripts/run.mjs db:validate",
+    "db:format": "node scripts/run.mjs db:format",
+    "db:generate": "node scripts/run.mjs db:generate",
+    "db:deploy": "node scripts/run.mjs db:deploy",
+    "db:status": "node scripts/run.mjs db:status",
+    "infra:up": "docker compose --env-file .env -f infrastructure/containers/compose.yaml up -d --wait",
+    "infra:down": "docker compose --env-file .env -f infrastructure/containers/compose.yaml down"
+  },
+  "devDependencies": { "prisma": "6.19.0", "@prisma/client": "6.19.0", "typescript": "^5.9.3", "tsx": "^4.20.6", "@types/node": "^24.0.0" }
+}
