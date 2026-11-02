@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Activity, RefreshCw, X } from 'lucide-react';
 import { api } from '../lib/api';
 import ServerActivity from './server-activity';
+import HostManagement from './host-management';
 
 export type Group = { id: string; name: string };
 export type InventoryRecord = {
@@ -80,6 +81,7 @@ export function ServerTelemetry({ organizationId, server, groups, canManage, onC
     } catch (error) { callbacks.current.onError(error); } finally { setBusy(false); }
   }
   return <section className="panel section-gap server-telemetry"><div className="panel-heading"><div><h2>{server.hostname} · health & history</h2><p>{server.os_version || server.os} · {server.architecture || 'Architecture unavailable'} · {server.logical_cpu_count ?? 'Unknown'} logical CPUs · {server.health.state.replaceAll('_', ' ')}</p></div><button className="text-button" aria-label="Close server details" onClick={onClose}><X size={20} /></button></div>
+    <HostManagement organizationId={organizationId} serverId={server.id} os={server.os} canManage={canManage} onError={onError} />
     <ServerActivity organizationId={organizationId} serverId={server.id} onError={onError} />
     <div className="metrics-grid">{[{ label: 'CPU use', value: percent(server.health.resources.CPU), total: 'Aggregate sample interval' }, { label: 'Memory use', value: percent(server.health.resources.MEMORY), total: `${size(server.latest_metrics?.memory_used_bytes)} / ${size(server.latest_metrics?.memory_total_bytes)}` }, { label: 'System disk use', value: percent(server.health.resources.DISK), total: `${size(server.latest_metrics?.disk_used_bytes)} / ${size(server.latest_metrics?.disk_total_bytes)}` }].map(metric => <div key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.total}</small></div>)}</div>
     <div className="telemetry-toolbar"><span className="muted">Latest report: {server.latest_metrics ? date(server.latest_metrics.received_at) : 'Not received'}. Values remain last-known if health is stale.</span><select aria-label="Metric history window" value={hours} onChange={event => setHours(event.target.value)}><option value="1">Last hour</option><option value="24">Last 24 hours</option><option value="168">Last 7 days</option></select></div>

@@ -33,42 +33,45 @@ import (
 	"time"
 )
 
-const agentVersion = "0.8.0-prototype"
+const agentVersion = "0.9.0-management"
 const maxSequence = int64(9007199254740991)
 
 type options struct {
-	apiURL     string
-	serverID   string
-	tokenFile  string
-	eventsFile string
-	eventsDir  string
-	stateDir   string
-	caFile     string
-	allowHTTP  bool
-	once       bool
+	managementHelper string
+	apiURL           string
+	serverID         string
+	tokenFile        string
+	eventsFile       string
+	eventsDir        string
+	stateDir         string
+	caFile           string
+	allowHTTP        bool
+	once             bool
 }
 
 type agentState struct {
-	ServerID           string       `json:"serverId"`
-	APIOrigin          string       `json:"apiOrigin"`
-	PrivateKey         string       `json:"privateKey"`
-	CredentialID       string       `json:"credentialId"`
-	Sequence           int64        `json:"sequence"`
-	ExpiresAt          string       `json:"expiresAt"`
-	PendingEvents      []agentEvent `json:"pendingEvents,omitempty"`
-	ImportedEventsHash string       `json:"importedEventsHash,omitempty"`
-	ImportedEventFile  string       `json:"importedEventFile,omitempty"`
+	ManagementResult   *commandResult `json:"managementResult,omitempty"`
+	ServerID           string         `json:"serverId"`
+	APIOrigin          string         `json:"apiOrigin"`
+	PrivateKey         string         `json:"privateKey"`
+	CredentialID       string         `json:"credentialId"`
+	Sequence           int64          `json:"sequence"`
+	ExpiresAt          string         `json:"expiresAt"`
+	PendingEvents      []agentEvent   `json:"pendingEvents,omitempty"`
+	ImportedEventsHash string         `json:"importedEventsHash,omitempty"`
+	ImportedEventFile  string         `json:"importedEventFile,omitempty"`
 }
 
 type agentResponse struct {
-	CredentialID      string `json:"credentialId"`
-	ServerID          string `json:"serverId"`
-	ExpiresAt         string `json:"expiresAt"`
-	Accepted          bool   `json:"accepted"`
-	AcceptedSequence  int64  `json:"acceptedSequence"`
-	HeartbeatInterval int    `json:"heartbeatIntervalSeconds"`
-	AcceptedCount     int    `json:"acceptedCount"`
-	DuplicateCount    int    `json:"duplicateCount"`
+	Command           *hostCommand `json:"command"`
+	CredentialID      string       `json:"credentialId"`
+	ServerID          string       `json:"serverId"`
+	ExpiresAt         string       `json:"expiresAt"`
+	Accepted          bool         `json:"accepted"`
+	AcceptedSequence  int64        `json:"acceptedSequence"`
+	HeartbeatInterval int          `json:"heartbeatIntervalSeconds"`
+	AcceptedCount     int          `json:"acceptedCount"`
+	DuplicateCount    int          `json:"duplicateCount"`
 }
 
 type responseError struct{ status int }
@@ -320,6 +323,11 @@ func uptime() int64 {
 }
 
 func run(ctx context.Context, config options) error {
+	if config.managementHelper != "" {
+		if err := validateHelper(config.managementHelper); err != nil {
+			return err
+		}
+	}
 	if config.eventsFile != "" && config.eventsDir != "" {
 		return errors.New("choose events-file or events-dir, not both")
 	}
@@ -426,6 +434,9 @@ func run(ctx context.Context, config options) error {
 			metadata["credentialId"], metadata["sequence"], metadata["uptimeSeconds"] = state.CredentialID, state.Sequence, uptime()
 			metadata["inventory"] = map[string]any{"architecture": runtime.GOARCH, "logicalCpuCount": runtime.NumCPU()}
 			metadata["metrics"] = collector.collect()
+			if config.managementHelper != "" {
+				metadata["management"] = managementReport(ctx, config, state)
+			}
 			var response *agentResponse
 			response, err = send(ctx, client, origin, "/api/agent/v1/heartbeat", key, metadata)
 			if err == nil {
@@ -434,6 +445,9 @@ func run(ctx context.Context, config options) error {
 				}
 				if response.HeartbeatInterval >= 10 && response.HeartbeatInterval <= 300 {
 					interval = time.Duration(response.HeartbeatInterval) * time.Second
+				}
+				if err = executeManagement(ctx, config, state, response.Command); err != nil {
+					return err
 				}
 				log.Printf("heartbeat accepted (sequence %d)", state.Sequence)
 			}
@@ -513,6 +527,7 @@ func selfTest() error {
 
 func main() {
 	var config options
+	flag.StringVar(&config.managementHelper, "management-helper", "", "optional root-owned management helper Python script")
 	flag.StringVar(&config.apiURL, "api", "", "control-plane HTTPS origin")
 	flag.StringVar(&config.serverID, "server-id", "", "registered server UUID")
 	flag.StringVar(&config.tokenFile, "token-file", "", "private enrollment token file; required only before first enrollment")

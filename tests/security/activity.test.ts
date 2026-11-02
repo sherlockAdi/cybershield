@@ -45,3 +45,25 @@ test('daily server activity isolates tenants and dates, aggregates repeated ping
     await assert.rejects(service.report(actor, organization, other, { date: day }));
   } finally { await db.close(); }
 });
+
+test('login pagination traverses beyond 100 rows without gaps or duplicates at tied timestamps', async () => {
+ const db=await new Database().open(true), org=randomUUID(), user=randomUUID(), server=randomUUID();
+ try {
+  await db.query("INSERT INTO organizations(id,name,updated_at) VALUES($1,'Pagination',now())",[org]);
+  await db.query("INSERT INTO users(id,name,email,password_hash) VALUES($1,'Pages','pages@example.test','unused')",[user]);
+  await db.query("INSERT INTO memberships(organization_id,user_id,role) VALUES($1,$2,'OWNER')",[org,user]);
+  await db.query("INSERT INTO servers(id,organization_id,hostname,os) VALUES($1,$2,'pages','LINUX')",[server,org]);
+  const day=new Date(Date.now()+19800000-86400000).toISOString().slice(0,10), time=new Date(Date.parse(indiaDay(day).start)+1000);
+  for(let i=0;i<105;i++) await db.query("INSERT INTO security_events(id,organization_id,server_id,source_event_id,kind,severity,occurred_at,payload) VALUES($1,$2,$3,$4,'AUTH_SUCCESS','INFO',$5,'{}')",[randomUUID(),org,server,randomUUID(),time]);
+  const service=new ActivityService(db,new ControlService(db)), seen=new Set<string>();
+  let cursor: string|null=null;
+  do {
+   const page=await service.report({id:user} as Actor,org,server,{date:day,...(cursor?{loginCursor:cursor}:{})});
+   assert.ok(page.logins.length<=10);
+   for(const row of page.logins){assert.ok(!seen.has(row.id));seen.add(row.id);}
+   cursor=page.nextLoginCursor;
+  }while(cursor);
+  assert.equal(seen.size,105);
+  await assert.rejects(service.report({id:user} as Actor,org,server,{date:day,loginCursor:randomUUID()}));
+ }finally{await db.close();}
+});

@@ -63,3 +63,7 @@ Open `http://127.0.0.1:3100`. Create an account, enable MFA and save recovery co
 ## Contribution rules
 
 Changes require organization authorization, explicit input validation, safe failure behavior, and an audit trail where relevant. Do not introduce arbitrary remote shell execution. Run `pnpm check` and relevant behavior tests before review. Do not commit secrets, real event payloads, or private keys. No product license is selected yet; see [licensing](docs/licensing.md).
+
+## Host management
+
+Server and login tables now use ten-record pages. See [host management deployment and configuration](docs/host-management.md) for application inventory, IP block/unblock, Linux service/container stops and Windows service/IIS stops. Host actions require the upgraded, explicitly configured agent.

@@ -13,6 +13,7 @@ import { TelemetryService } from './telemetry';
 import { FirewallService } from './firewall';
 import { RolloutService } from './rollouts';
 import { DetectionService } from './detections';
+import { HostManagementService } from './host-management';
 import { ActivityService } from './activity';
 
 @Catch()
@@ -28,7 +29,7 @@ class SafeErrors implements ExceptionFilter {
 
 @Controller('api')
 class ApiController {
-  constructor(@Inject(ControlService) private readonly service: ControlService, @Inject(AgentService) private readonly agents: AgentService, @Inject(TelemetryService) private readonly telemetry: TelemetryService, @Inject(FirewallService) private readonly firewall: FirewallService, @Inject(RolloutService) private readonly rollouts: RolloutService, @Inject(DetectionService) private readonly detections: DetectionService, @Inject(ActivityService) private readonly activity: ActivityService) {}
+  constructor(@Inject(HostManagementService) private readonly management: HostManagementService, @Inject(ControlService) private readonly service: ControlService, @Inject(AgentService) private readonly agents: AgentService, @Inject(TelemetryService) private readonly telemetry: TelemetryService, @Inject(FirewallService) private readonly firewall: FirewallService, @Inject(RolloutService) private readonly rollouts: RolloutService, @Inject(DetectionService) private readonly detections: DetectionService, @Inject(ActivityService) private readonly activity: ActivityService) {}
   @Get('organizations/:id/servers/:serverId/activity') async serverActivity(@Req() request: Request, @Param('id') id: string, @Param('serverId') serverId: string, @Query() query: unknown) { return this.activity.report(await this.service.authenticate(request), id, serverId, query); }
 
   @Get('organizations/:id/security/settings') async detectionSettings(@Req() request: Request, @Param('id') id: string) { return this.detections.config(await this.service.authenticate(request), id); }
@@ -61,6 +62,8 @@ class ApiController {
   @Post('agent/v1/events') ingestEvents(@Req() request: AgentRequest) { return this.telemetry.ingest(request); }
   @Get('organizations/:id/inventory') async inventory(@Req() request: Request, @Param('id') id: string, @Query() query: unknown) { return this.telemetry.inventory(await this.service.authenticate(request), id, query); }
   @Get('organizations/:id/events') async events(@Req() request: Request, @Param('id') id: string, @Query() query: unknown) { return this.telemetry.events(await this.service.authenticate(request), id, query); }
+  @Get('organizations/:id/servers/:serverId/management') async hostManagement(@Req() request: Request, @Param('id') id: string, @Param('serverId') serverId: string) { return this.management.read(await this.service.authenticate(request), id, serverId); }
+  @Post('organizations/:id/servers/:serverId/commands') async hostCommand(@Req() request: Request, @Param('id') id: string, @Param('serverId') serverId: string, @Body() body: unknown) { return this.management.command(await this.service.authenticate(request), id, serverId, body); }
   @Get('organizations/:id/groups') async groups(@Req() request: Request, @Param('id') id: string) { return this.telemetry.groups(await this.service.authenticate(request), id); }
   @Post('organizations/:id/groups') async createGroup(@Req() request: Request, @Param('id') id: string, @Body() body: unknown) { return this.telemetry.createGroup(await this.service.authenticate(request), id, body); }
   @Patch('organizations/:id/servers/:serverId/metadata') async metadata(@Req() request: Request, @Param('id') id: string, @Param('serverId') serverId: string, @Body() body: unknown) { return this.telemetry.updateMetadata(await this.service.authenticate(request), id, serverId, body); }
@@ -95,7 +98,7 @@ class ApiController {
 
 export async function createApp(database?: Database) {
   const db = database || await new Database().open();
-  @Module({ controllers: [ApiController], providers: [{ provide: Database, useValue: db }, ControlService, AgentService, TelemetryService, FirewallService, RolloutService, DetectionService, ActivityService] })
+  @Module({ controllers: [ApiController], providers: [{ provide: Database, useValue: db }, ControlService, AgentService, TelemetryService, FirewallService, RolloutService, DetectionService, ActivityService, HostManagementService] })
   class AppModule {}
   const app = await NestFactory.create(AppModule, { logger: ['error', 'warn'], bodyParser: false });
   app.use(helmet());
@@ -120,8 +123,9 @@ export async function createApp(database?: Database) {
   });
   const rawBody = (request: express.Request, _response: express.Response, buffer: Buffer) => { (request as AgentRequest).rawBody = Buffer.from(buffer); };
   const normalJson = express.json({ limit: '16kb', verify: rawBody });
+  const heartbeatJson = express.json({ limit: '256kb', verify: rawBody });
   const eventsJson = express.json({ limit: '64kb', verify: rawBody });
-  app.use((request: Request, response: Response, next: NextFunction) => (request.originalUrl === '/api/agent/v1/events' ? eventsJson : normalJson)(request, response, next));
+  app.use((request: Request, response: Response, next: NextFunction) => (request.originalUrl === '/api/agent/v1/events' ? eventsJson : request.originalUrl === '/api/agent/v1/heartbeat' ? heartbeatJson : normalJson)(request, response, next));
   app.useGlobalFilters(new SafeErrors());
   app.enableShutdownHooks();
   return { app, db };

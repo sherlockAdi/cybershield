@@ -6,13 +6,14 @@ import { Database, Row, Queryable } from './database';
 import { Actor, ControlService } from './service';
 import { input, uuid } from './input';
 import { digest, token } from './security';
+import { managementSchema, acceptManagement } from './host-management';
 import { inventorySchema, metricsSchema, recordMetrics } from './telemetry-model';
 
 const hostname = z.string().trim().min(1).max(253).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const os = z.enum(['LINUX', 'WINDOWS']);
 const version = z.string().min(1).max(100);
 const enrollmentSchema = z.object({ schemaVersion: z.literal(1), serverId: uuid, token: z.string().min(32).max(100), publicKey: z.string().max(2048), hostname, os, osVersion: version, agentVersion: version }).strict();
-const heartbeatSchema = z.object({ schemaVersion: z.literal(1), serverId: uuid, credentialId: uuid, sequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER), hostname, os, osVersion: version, agentVersion: version, uptimeSeconds: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), inventory: inventorySchema.optional(), metrics: metricsSchema.optional() }).strict();
+const heartbeatSchema = z.object({ schemaVersion: z.literal(1), serverId: uuid, credentialId: uuid, sequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER), hostname, os, osVersion: version, agentVersion: version, uptimeSeconds: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), inventory: inventorySchema.optional(), metrics: metricsSchema.optional(), management: managementSchema.nullish() }).strict();
 
 export type AgentRequest = Request & { rawBody?: Buffer };
 export function signingMessage(path: string, timestamp: string, nonce: string, rawBody: Buffer) {
@@ -137,7 +138,7 @@ export class AgentService {
       await client.query('UPDATE agent_credentials SET revoked_at=now() WHERE organization_id=$1 AND server_id=$2 AND revoked_at IS NULL', [organizationId, data.serverId]);
       await client.query('INSERT INTO agent_credentials (id,organization_id,server_id,public_key_pem,key_fingerprint,expires_at) VALUES ($1,$2,$3,$4,$5,$6)', [credentialId, organizationId, data.serverId, key.export({ format: 'pem', type: 'spki' }).toString(), fingerprint, expiresAt]);
       await client.query('UPDATE enrollment_tokens SET consumed_at=now(),credential_id=$2 WHERE id=$1', [enrollment.id, credentialId]);
-      await client.query('UPDATE servers SET hostname=$3,os_version=$4,agent_version=$5,last_heartbeat_at=NULL,uptime_seconds=NULL,capabilities=$6::jsonb WHERE organization_id=$1 AND id=$2', [organizationId, data.serverId, data.hostname, data.osVersion, data.agentVersion, JSON.stringify({ heartbeat: true, firewall: false, execution: false })]);
+      await client.query('UPDATE servers SET hostname=$3,os_version=$4,agent_version=$5,last_heartbeat_at=NULL,uptime_seconds=NULL,management_snapshot=NULL,management_received_at=NULL,capabilities=$6::jsonb WHERE organization_id=$1 AND id=$2', [organizationId, data.serverId, data.hostname, data.osVersion, data.agentVersion, JSON.stringify({ heartbeat: true, firewall: false, execution: false })]);
       await this.control.audit(client, organizationId, null, 'agent.enrolled', data.serverId, { credentialId, fingerprint });
       return { credentialId, serverId: data.serverId, expiresAt, heartbeatIntervalSeconds: 30 };
     });
@@ -152,7 +153,8 @@ export class AgentService {
       const updated = await client.query('UPDATE servers SET hostname=$3,os_version=$4,agent_version=$5,uptime_seconds=$6,last_heartbeat_at=now() WHERE organization_id=$1 AND id=$2 RETURNING last_heartbeat_at', [server.organization_id, data.serverId, data.hostname, data.osVersion, data.agentVersion, data.uptimeSeconds]);
       if (data.inventory) await client.query('UPDATE servers SET architecture=$3,logical_cpu_count=$4 WHERE organization_id=$1 AND id=$2', [server.organization_id, data.serverId, data.inventory.architecture, data.inventory.logicalCpuCount]);
       if (data.metrics) await recordMetrics(client, server.organization_id, data.serverId, data.credentialId, data.sequence, data.metrics);
-      return { accepted: true, serverId: data.serverId, acceptedSequence: data.sequence, receivedAt: updated.rows[0].last_heartbeat_at, heartbeatIntervalSeconds: 30, credentialExpiresAt: credential.expires_at };
+      const command = data.management ? await acceptManagement(client, server.organization_id, data.serverId, data.credentialId, data.management) : null;
+      return { command, accepted: true, serverId: data.serverId, acceptedSequence: data.sequence, receivedAt: updated.rows[0].last_heartbeat_at, heartbeatIntervalSeconds: 30, credentialExpiresAt: credential.expires_at };
     });
   }
 

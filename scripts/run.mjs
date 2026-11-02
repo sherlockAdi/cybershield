@@ -45,7 +45,7 @@ try {
     else await execute(bin('', 'typescript/bin/tsc'), ['--noEmit', '-p', 'apps/dashboard/tsconfig.json']);
   } else if (mode === 'test') {
     await execute('--test', ['tests/operations/release-backup.test.mjs']);
-    await execute(bin('', 'tsx/dist/cli.mjs'), ['--test', '../../tests/security/foundation.test.ts', '../../tests/security/agents.test.ts', '../../tests/security/telemetry.test.ts', '../../tests/security/activity.test.ts', '../../tests/security/firewall.test.ts', '../../tests/security/rollouts.test.ts', '../../tests/security/detections.test.ts'], api);
+    await execute(bin('', 'tsx/dist/cli.mjs'), ['--test', '../../tests/security/foundation.test.ts', '../../tests/security/agents.test.ts', '../../tests/security/telemetry.test.ts', '../../tests/security/activity.test.ts', '../../tests/security/host-management.test.ts', '../../tests/security/firewall.test.ts', '../../tests/security/rollouts.test.ts', '../../tests/security/detections.test.ts'], api);
   } else if (mode.startsWith('db:')) {
     const command = mode.slice(3);
     if (!['validate', 'format', 'generate', 'deploy', 'status'].includes(command)) throw new Error('Unsupported database command');

@@ -28,6 +28,7 @@ jobs:
           cache: false
       - run: go test ./...
         working-directory: agents/linux-agent
+      - run: python3 -m unittest discover -s agents/management -p 'test_*.py'
       - run: mkdir -p artifacts/linux-amd64
       - run: go vet ./...
         working-directory: agents/linux-agent

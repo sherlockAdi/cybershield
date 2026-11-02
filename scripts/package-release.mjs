@@ -41,7 +41,7 @@ export async function packageRelease({ output, version, sourceRoot = root, inclu
     binaries.push('windows-x64-framework-dependent');
   }
   files.sort((left, right) => left.path.localeCompare(right.path));
-  const manifest = { format: 'serverguard-pilot-release', schemaVersion: 1, version, createdAt: new Date().toISOString(), signed: false, sourceOnlyControlPlane: true, requiredNode: '22 or 24', requiredPnpm: '11.25.0', windowsAgentRuntime: '.NET 10', binaries, nativeFirewallExecution: false, automaticOsLogCollection: false, externalNotificationsConfigured: false, files };
+  const manifest = { format: 'serverguard-pilot-release', schemaVersion: 1, version, createdAt: new Date().toISOString(), signed: false, sourceOnlyControlPlane: true, requiredNode: '22 or 24', requiredPnpm: '11.25.0', windowsAgentRuntime: '.NET 10', binaries, nativeFirewallExecution: false, optionalHostManagement: true, automaticOsLogCollection: false, externalNotificationsConfigured: false, files };
   await fs.writeFile(path.join(output, 'manifest.json'), JSON.stringify(manifest, null, 2), { flag: 'wx', mode: 0o644 });
   await verifyRelease(output);
   return { output, version, files: files.length, signed: false, manifestSha256: hash(await fs.readFile(path.join(output, 'manifest.json'))) };
