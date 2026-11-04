@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
 
 func TestManagementExpiredAndReplayedCommandsNeverExecute(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux agent persistence; Windows uses the .NET agent")
+	}
 	directory := t.TempDir()
 	config := options{stateDir: directory, managementHelper: "/does/not/exist"}
 	state := &agentState{}

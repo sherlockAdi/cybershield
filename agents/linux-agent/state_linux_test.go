@@ -18,6 +18,9 @@ import (
 
 func TestStateLockRejectsConcurrentProcess(t *testing.T) {
 	directory := t.TempDir()
+	if err := os.Chmod(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
 	unlock, err := lockState(directory)
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +104,9 @@ func TestRunEnrollsAndResumesPersistedIdentity(t *testing.T) {
 	}))
 	defer server.Close()
 	directory := t.TempDir()
+	if err := os.Chmod(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
 	tokenFile := filepath.Join(t.TempDir(), "enrollment.token")
 	if err := os.WriteFile(tokenFile, []byte("synthetic-enrollment-token-for-unit-testing"), 0600); err != nil {
 		t.Fatal(err)

@@ -64,3 +64,50 @@ jobs:
       - run: go test ./...
         working-directory: agents/linux-agent
       - run: node scripts/run.mjs test
+  deploy:
+    name: Deploy frontend backend and migrations
+    needs: [verify, linux-agent, windows-agent]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: cybershield-production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: https://cybershield360.vvvitsolutions.online
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Configure pinned SSH connection
+        env:
+          DEPLOY_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PRODUCTION_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_KEY"
+          test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/cybershield_deploy"
+          printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/cybershield_deploy" "$HOME/.ssh/known_hosts"
+      - name: Deploy exact checked commit
+        env:
+          DEPLOY_HOST: ${{ secrets.PRODUCTION_HOST }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [ "$latest" != "$GITHUB_SHA" ]; then
+            echo "Skipping superseded commit $GITHUB_SHA"
+            exit 0
+          fi
+          git archive --format=tar HEAD > "$RUNNER_TEMP/release.tar"
+          ssh -T -i "$HOME/.ssh/cybershield_deploy" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+            "root@$DEPLOY_HOST" "deploy $GITHUB_SHA" < "$RUNNER_TEMP/release.tar"
+      - name: Remove temporary SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/cybershield_deploy"
