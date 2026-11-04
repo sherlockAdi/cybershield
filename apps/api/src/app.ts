@@ -15,6 +15,7 @@ import { RolloutService } from './rollouts';
 import { DetectionService } from './detections';
 import { HostManagementService } from './host-management';
 import { ActivityService } from './activity';
+import { DocumentService } from './documents';
 
 @Catch()
 class SafeErrors implements ExceptionFilter {
@@ -29,7 +30,7 @@ class SafeErrors implements ExceptionFilter {
 
 @Controller('api')
 class ApiController {
-  constructor(@Inject(HostManagementService) private readonly management: HostManagementService, @Inject(ControlService) private readonly service: ControlService, @Inject(AgentService) private readonly agents: AgentService, @Inject(TelemetryService) private readonly telemetry: TelemetryService, @Inject(FirewallService) private readonly firewall: FirewallService, @Inject(RolloutService) private readonly rollouts: RolloutService, @Inject(DetectionService) private readonly detections: DetectionService, @Inject(ActivityService) private readonly activity: ActivityService) {}
+  constructor(@Inject(DocumentService) private readonly documents: DocumentService, @Inject(HostManagementService) private readonly management: HostManagementService, @Inject(ControlService) private readonly service: ControlService, @Inject(AgentService) private readonly agents: AgentService, @Inject(TelemetryService) private readonly telemetry: TelemetryService, @Inject(FirewallService) private readonly firewall: FirewallService, @Inject(RolloutService) private readonly rollouts: RolloutService, @Inject(DetectionService) private readonly detections: DetectionService, @Inject(ActivityService) private readonly activity: ActivityService) {}
   @Get('organizations/:id/servers/:serverId/activity') async serverActivity(@Req() request: Request, @Param('id') id: string, @Param('serverId') serverId: string, @Query() query: unknown) { return this.activity.report(await this.service.authenticate(request), id, serverId, query); }
 
   @Get('organizations/:id/security/settings') async detectionSettings(@Req() request: Request, @Param('id') id: string) { return this.detections.config(await this.service.authenticate(request), id); }
@@ -57,6 +58,19 @@ class ApiController {
   @Post('organizations/:id/firewall/policies/:policyId/versions/:versionId/preview') async previewPolicy(@Req() request: Request, @Param('id') id: string, @Param('policyId') policyId: string, @Param('versionId') versionId: string, @Body() body: unknown) { return this.firewall.preview(await this.service.authenticate(request), id, policyId, versionId, body); }
   @Post('organizations/:id/firewall/policies/:policyId/versions/:versionId/submit') async submitPolicy(@Req() request: Request, @Param('id') id: string, @Param('policyId') policyId: string, @Param('versionId') versionId: string, @Body() body: unknown) { return this.firewall.submit(await this.service.authenticate(request), id, policyId, versionId, body); }
   @Get('organizations/:id/firewall/policies/:policyId/history') async policyHistory(@Req() request: Request, @Param('id') id: string, @Param('policyId') policyId: string, @Query() query: unknown) { return this.firewall.history(await this.service.authenticate(request), id, policyId, query); }
+
+  @Get('organizations/:id/documents/vault') async documentVault(@Req() req: Request, @Param('id') id: string) { return this.documents.vault(await this.service.authenticate(req),id); }
+  @Post('organizations/:id/documents/vault') async createDocumentVault(@Req() req: Request, @Param('id') id: string, @Body() body: unknown) { return this.documents.createVault(await this.service.authenticate(req),id,body); }
+  @Get('organizations/:id/documents') async documentList(@Req() req: Request, @Param('id') id: string) { return this.documents.list(await this.service.authenticate(req),id); }
+  @Post('organizations/:id/documents') async createDocument(@Req() req: Request, @Param('id') id: string, @Body() body: unknown) { return this.documents.create(await this.service.authenticate(req),id,body); }
+  @Post('organizations/:id/documents/:doc/chunks') async uploadDocumentChunk(@Req() req: Request, @Param('id') id: string, @Param('doc') doc: string, @Body() body: unknown) { return this.documents.uploadChunk(await this.service.authenticate(req),id,doc,body); }
+  @Get('organizations/:id/documents/:doc/chunks/:index') async readDocumentChunk(@Req() req: Request, @Param('id') id: string, @Param('doc') doc: string, @Param('index') index: string) { return this.documents.chunk(await this.service.authenticate(req),id,doc,index); }
+  @Post('organizations/:id/documents/:doc/complete') async completeDocument(@Req() req: Request, @Param('id') id: string, @Param('doc') doc: string) { return this.documents.complete(await this.service.authenticate(req),id,doc); }
+  @Delete('organizations/:id/documents/:doc') async removeDocument(@Req() req: Request, @Param('id') id: string, @Param('doc') doc: string) { return this.documents.remove(await this.service.authenticate(req),id,doc); }
+  @Get('organizations/:id/documents/:doc/links') async documentLinks(@Req() req: Request, @Param('id') id: string, @Param('doc') doc: string) { return this.documents.links(await this.service.authenticate(req),id,doc); }
+  @Post('organizations/:id/documents/:doc/links') async shareDocument(@Req() req: Request, @Param('id') id: string, @Param('doc') doc: string, @Body() body: unknown) { return this.documents.share(await this.service.authenticate(req),id,doc,body); }
+  @Delete('organizations/:id/documents/:doc/links/:link') async revokeDocumentLink(@Req() req: Request, @Param('id') id: string, @Param('doc') doc: string, @Param('link') link: string) { return this.documents.revoke(await this.service.authenticate(req),id,doc,link); }
+  @Post('documents/public') async publicDocument(@Body() body: unknown) { return this.documents.publicRead(body); }
 
   @Get('health') health() { return { status: 'ok', milestone: 'week-8-detections', database: this.service.db.mode }; }
   @Post('agent/v1/events') ingestEvents(@Req() request: AgentRequest) { return this.telemetry.ingest(request); }
@@ -98,7 +112,7 @@ class ApiController {
 
 export async function createApp(database?: Database) {
   const db = database || await new Database().open();
-  @Module({ controllers: [ApiController], providers: [{ provide: Database, useValue: db }, ControlService, AgentService, TelemetryService, FirewallService, RolloutService, DetectionService, ActivityService, HostManagementService] })
+  @Module({ controllers: [ApiController], providers: [{ provide: Database, useValue: db }, ControlService, AgentService, TelemetryService, FirewallService, RolloutService, DetectionService, ActivityService, HostManagementService, DocumentService] })
   class AppModule {}
   const app = await NestFactory.create(AppModule, { logger: ['error', 'warn'], bodyParser: false });
   app.use(helmet());
@@ -113,19 +127,21 @@ export async function createApp(database?: Database) {
       const now = Date.now();
       for (const [key, entry] of attempts) if (entry.expires <= now) attempts.delete(key);
       const sensitive = /\/auth\/(login|register|mfa\/confirm)/.test(request.path) || request.path === '/api/agent/v1/enroll';
-      const key = `${request.socket.remoteAddress}:${sensitive ? request.path : agentRequest ? 'agent' : 'write'}`;
+      const documentTransfer = request.path === '/api/documents/public' ? 'document-public' : /^\/api\/organizations\/[0-9a-f-]{36}\/documents\/[0-9a-f-]{36}\/chunks$/.test(request.path) ? 'document-upload' : '';
+      const key = `${request.socket.remoteAddress}:${sensitive ? request.path : agentRequest ? 'agent' : documentTransfer || 'write'}`;
       const entry = attempts.get(key) || { count: 0, expires: now + (sensitive ? 15 * 60000 : 60000) };
       entry.count++;
       attempts.set(key, entry);
-      if (entry.count > (sensitive ? 20 : agentRequest ? 4000 : 120)) { response.setHeader('Retry-After', String(Math.ceil((entry.expires - now) / 1000))); response.status(429).json({ message: 'Too many attempts. Please try later.' }); return; }
+      if (entry.count > (sensitive ? 20 : agentRequest ? 4000 : documentTransfer ? 600 : 120)) { response.setHeader('Retry-After', String(Math.ceil((entry.expires - now) / 1000))); response.status(429).json({ message: 'Too many attempts. Please try later.' }); return; }
     }
     next();
   });
   const rawBody = (request: express.Request, _response: express.Response, buffer: Buffer) => { (request as AgentRequest).rawBody = Buffer.from(buffer); };
   const normalJson = express.json({ limit: '16kb', verify: rawBody });
   const heartbeatJson = express.json({ limit: '256kb', verify: rawBody });
+  const documentJson = express.json({ limit: '70kb' });
   const eventsJson = express.json({ limit: '64kb', verify: rawBody });
-  app.use((request: Request, response: Response, next: NextFunction) => (request.originalUrl === '/api/agent/v1/events' ? eventsJson : request.originalUrl === '/api/agent/v1/heartbeat' ? heartbeatJson : normalJson)(request, response, next));
+  app.use((request: Request, response: Response, next: NextFunction) => (request.method === 'POST' && /^\/api\/organizations\/[0-9a-f-]{36}\/documents\/[0-9a-f-]{36}\/chunks$/.test(request.path) ? documentJson : request.originalUrl === '/api/agent/v1/events' ? eventsJson : request.originalUrl === '/api/agent/v1/heartbeat' ? heartbeatJson : normalJson)(request, response, next));
   app.useGlobalFilters(new SafeErrors());
   app.enableShutdownHooks();
   return { app, db };

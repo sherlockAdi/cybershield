@@ -1,0 +1,97 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {Database} from '../../apps/api/src/database';
+import {ControlService,type Actor} from '../../apps/api/src/service';
+import {DocumentService} from '../../apps/api/src/documents';
+import {derive,encode,importKey,randomKey,seal,open,encryptFile,decryptFile,readMetadata,collect,CHUNK} from '../../apps/dashboard/lib/document-crypto';
+
+test('encrypted vault preserves privacy, integrity, owner scope, expiring and revocable links',async()=>{
+ const db=await new Database().open(true),service=new DocumentService(db,new ControlService(db));
+ const org=randomUUID(),foreign=randomUUID(),user=randomUUID(),other=randomUUID(),id=randomUUID();
+ const actor={id:user} as Actor, stranger={id:other} as Actor;
+ try{
+  await db.query("INSERT INTO organizations(id,name,updated_at) VALUES($1,'Vault',now()),($2,'Other',now())",[org,foreign]);
+  await db.query("INSERT INTO users(id,name,email,password_hash) VALUES($1,'Owner','vault@example.test','unused'),($2,'Other admin','other-vault@example.test','unused')",[user,other]);
+  await db.query("INSERT INTO memberships(organization_id,user_id,role) VALUES($1,$2,'OWNER'),($1,$3,'ADMIN')",[org,user,other]);
+  const salt=encode(crypto.getRandomValues(new Uint8Array(16))),password='correct horse battery staple unique',context=`vault:${org}:${user}:v1`;
+  const passKey=await derive(password,salt),master=await importKey(randomKey());
+  // Wrap a known raw vault key and prove it can only be unlocked by the right password/context.
+  const vaultRaw=randomKey(),wrappedKey=await seal(passKey,vaultRaw,context);
+  assert.deepEqual(await open(await derive(password,salt),wrappedKey,context),vaultRaw);
+  await assert.rejects(open(await derive('wrong passphrase',salt),wrappedKey,context));
+  await assert.rejects(open(passKey,wrappedKey,context+'other'));
+  await service.createVault(actor,org,{salt,wrappedKey});
+  await assert.rejects(service.createVault(actor,org,{salt,wrappedKey}));
+  assert.equal(await service.vault(stranger,org),null);
+  await assert.rejects(service.vault(actor,foreign));
+  const clear=new TextEncoder().encode('private report contents '.repeat(3000)),rawFile=randomKey(),key=await importKey(rawFile);
+  const encrypted=await encryptFile(key,clear.buffer,id),metadata=await seal(key,new TextEncoder().encode(JSON.stringify({name:'secret-report.txt',size:clear.length,iv:encrypted.iv})),`document:${id}:metadata:v1`);
+  const data={id,wrappedKey:await seal(master,rawFile,`document:${id}:key:v1`),metadata,ciphertextSize:encrypted.ciphertext.length,chunkCount:Math.ceil(encrypted.ciphertext.length/CHUNK)};
+  await service.create(actor,org,data);
+  await assert.rejects(service.share(actor,org,id,{minutes:1}),/incomplete/);
+  await assert.rejects(service.complete(actor,org,id),/incomplete/);
+  await assert.rejects(service.uploadChunk(stranger,org,id,{index:0,ciphertext:encode(encrypted.ciphertext.slice(0,CHUNK))}));
+  await assert.rejects(service.uploadChunk(actor,org,id,{index:106,ciphertext:'AAAA'}));
+  for(let index=0;index<data.chunkCount;index++)await service.uploadChunk(actor,org,id,{index,ciphertext:encode(encrypted.ciphertext.slice(index*CHUNK,(index+1)*CHUNK))});
+  await service.complete(actor,org,id);
+  await assert.rejects(service.uploadChunk(actor,org,id,{index:0,ciphertext:encode(encrypted.ciphertext.slice(0,CHUNK))}));
+  assert.equal((await service.list(stranger,org)).length,0);
+  await assert.rejects(service.chunk(stranger,org,id,'0'));
+  await assert.rejects(service.share(stranger,org,id,{minutes:1}));
+  await assert.rejects(service.remove(stranger,org,id));
+  await assert.rejects(service.share(actor,org,id,{minutes:60}));
+  const link=await service.share(actor,org,id,{minutes:1});
+  const publicDoc=await service.publicRead({token:link.token});
+  assert.ok('metadata' in publicDoc);assert.equal('wrapped_key' in publicDoc,false);
+  const bytes=await collect(data.chunkCount,data.ciphertextSize,async index=>await service.publicRead({token:link.token,index}) as {ciphertext:string});
+  const meta=await readMetadata(key,metadata,id);
+  assert.deepEqual(new Uint8Array(await decryptFile(key,bytes,meta,id)),clear);
+  const tampered=bytes.slice();tampered[0]^=1;await assert.rejects(decryptFile(key,tampered,meta,id));
+  await assert.rejects(decryptFile(key,bytes,meta,randomUUID()));
+  const persisted=JSON.stringify((await db.query('SELECT * FROM encrypted_documents')).rows)+JSON.stringify((await db.query('SELECT * FROM document_chunks')).rows)+JSON.stringify((await db.query('SELECT * FROM document_vaults')).rows)+JSON.stringify((await db.query('SELECT * FROM document_links')).rows);
+  for(const secret of ['secret-report.txt','private report contents',password,encode(rawFile),encode(vaultRaw),link.token])assert.equal(persisted.includes(secret),false);
+  await db.query("UPDATE document_links SET expires_at=now()-interval '1 second' WHERE id=$1",[link.id]);
+  await assert.rejects(service.publicRead({token:link.token}));await assert.rejects(service.publicRead({token:link.token,index:0}));
+  const thirty=await service.share(actor,org,id,{minutes:30});
+  const ttl=new Date(thirty.expiresAt).getTime()-Date.now();assert.ok(ttl>29*60000&&ttl<=30*60000+1000);
+  await assert.rejects(service.revoke(stranger,org,id,thirty.id));
+  await service.revoke(actor,org,id,thirty.id);await assert.rejects(service.publicRead({token:thirty.token,index:0}));
+  const removedMember=await service.share(actor,org,id,{minutes:1});await db.query('DELETE FROM memberships WHERE organization_id=$1 AND user_id=$2',[org,user]);await assert.rejects(service.publicRead({token:removedMember.token}));
+  await db.query("INSERT INTO memberships(organization_id,user_id,role) VALUES($1,$2,'OWNER')",[org,user]);
+  await service.remove(actor,org,id);await assert.rejects(service.publicRead({token:removedMember.token}));
+  assert.equal((await db.query('SELECT * FROM document_chunks')).rows.length,0);assert.equal((await db.query('SELECT * FROM document_links')).rows.length,0);
+ }finally{await db.close();}
+});
+
+test('document HTTP endpoints enforce authentication, CSRF, origin, chunk body limits and no-store',async()=>{
+ const {createApp}=await import('../../apps/api/src/app');
+ const db=await new Database().open(true),control=new ControlService(db),{app}=await createApp(db);
+ await app.listen(0,'127.0.0.1');const base=await app.getUrl();
+ const org=randomUUID(),user=randomUUID(),id=randomUUID();
+ try{
+  await db.query("INSERT INTO organizations(id,name,updated_at) VALUES($1,'HTTP vault',now())",[org]);
+  await db.query("INSERT INTO users(id,name,email,password_hash,mfa_enabled,mfa_secret_encrypted) VALUES($1,'User','http-vault@example.test','unused',true,'fixture-only')",[user]);
+  await db.query("INSERT INTO memberships(organization_id,user_id,role) VALUES($1,$2,'OWNER')",[org,user]);
+  const session=await control.session(db,user,true);
+  const headers={'Content-Type':'application/json',Origin:'http://127.0.0.1:3100',Cookie:`sg_access=${session.access}`,'X-CSRF-Token':session.csrf};
+  const call=(path:string,body?:unknown,override:Record<string,string>={})=>fetch(`${base}/api${path}`,{method:body===undefined?'GET':'POST',headers:{...headers,...override},body:body===undefined?undefined:JSON.stringify(body)});
+  const path=`/organizations/${org}/documents`;
+  assert.equal((await call(path,undefined,{Cookie:''})).status,401);
+  const wrapped={iv:encode(new Uint8Array(12)),data:encode(new Uint8Array(48))};
+  const vault={salt:encode(new Uint8Array(16)),wrappedKey:wrapped};
+  assert.equal((await call(`${path}/vault`,vault,{'X-CSRF-Token':''})).status,403);
+  assert.equal((await call(`${path}/vault`,vault,{Origin:'https://evil.example'})).status,403);
+  assert.equal((await call(`${path}/vault`,vault)).status,201);
+  assert.equal((await call(path,{id,wrappedKey:wrapped,metadata:wrapped,ciphertextSize:CHUNK,chunkCount:1})).status,201);
+  const chunk={index:0,ciphertext:encode(new Uint8Array(CHUNK))};
+  assert.equal((await call(`${path}/${id}/chunks`,chunk)).status,201,'64KB ciphertext survives the chunk-specific parser');
+  assert.equal((await call(`${path}/${id}/chunks`,{...chunk,ciphertext:'a'.repeat(80*1024)})).status,413);
+  assert.equal((await call(`${path}/${id}/complete`,{})).status,201);
+  const shared=await (await call(`${path}/${id}/links`,{minutes:1})).json() as {token:string};
+  const publicResponse=await call('/documents/public',{token:shared.token},{Cookie:'','X-CSRF-Token':''});
+  assert.equal(publicResponse.status,201);assert.equal(publicResponse.headers.get('cache-control'),'no-store');
+  assert.equal((await call('/documents/public',{token:shared.token},{Origin:'https://evil.example'})).status,403);
+  assert.equal((await call(`${path}/${id}/links`,{minutes:0})).status,400);
+ }finally{await app.close();await db.close();}
+});

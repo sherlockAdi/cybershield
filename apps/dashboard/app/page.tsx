@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { FolderArchive, Database, Network, ShieldCheck, LayoutDashboard, Users, Building2, ScrollText, LockKeyhole, LogOut, ArrowUpRight, ChevronRight, Server, SlidersHorizontal, Activity, Plus, Check, X, Copy, Terminal, KeyRound, ArrowRight, Shield, Menu, RefreshCw } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import Documents from './documents';
 import Alerts from './alerts'; import Rollouts from './rollouts'; import Firewall from './firewall'; import Servers from './servers'; import { Events } from './telemetry';
 
 type Role = 'OWNER' | 'ADMIN' | 'OPERATOR' | 'VIEWER';
@@ -161,11 +162,12 @@ export default function Home() {
       <main className="content"><div className="page-heading"><div><span className="eyebrow">SERVERGUARD CONTROL PLANE</span><h1>{page === 'overview' ? 'Security overview' : navigation.find(item => item.id === page)?.label}</h1><p className="muted">{page === 'overview' ? `Welcome back, ${me.user.name.split(' ')[0]}. Here’s your workspace at a glance.` : page === 'documents' ? 'A dedicated workspace for your organization’s documents.' : page === 'details' ? 'A dedicated workspace for structured records and information.' : page === 'network' ? 'Access host controls, firewall policies and security activity.' : page === 'servers' ? 'Inspect host inventory, resource health and authenticated heartbeats.' : page === 'alerts' ? 'Investigate SSH/RDP and process indicators, review evidence and track in-app delivery.' : page === 'rollouts' ? 'Real approvals with simulation-only canaries, verification, rollback and offline scenarios.' : page === 'firewall' ? 'Validate rules, inspect native plans and preserve a versioned audit trail.' : page === 'events' ? 'Normalized agent events and resource-state transitions. Not a detection verdict.' : page === 'members' ? 'The right people. The right permissions. Every change accounted for.' : page === 'organizations' ? 'Keep teams and infrastructure securely separated.' : page === 'audit' ? 'A clear record of administrative decisions in this organization.' : 'Manage the protection around your personal account.'}</p></div><button className="button secondary compact" disabled={busy || loading} onClick={() => action(async () => { await refreshWorkspace(); })}><RefreshCw size={15} /> Refresh</button></div>
       {error && <div className="message error" role="alert">{error}<button aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></button></div>}{notice && <div className="message success" role="status">{notice}<button aria-label="Dismiss notification" onClick={() => setNotice('')}><X size={16} /></button></div>}
       {loading ? <div className="loading-panel"><span className="spinner" /> Loading organization…</div> : !organization ? <section className="panel empty"><Building2 size={32} /><h2>Create or join an organization</h2><p>Your account is ready. Choose where you want to work.</p><div className="button-row"><button className="button primary" onClick={() => setModal('create')}>Create organization</button><button className="button secondary" onClick={() => setModal('join')}>Join with a token</button></div></section> : <>
-        {(page === 'documents' || page === 'details') && <section className="panel settings-panel">
-          <span className="feature-icon">{page === 'documents' ? <FolderArchive size={28} /> : <Database size={28} />}</span>
-          <h2>{page === 'documents' ? 'Document storage workspace' : 'Details workspace'}</h2>
-          <p className="muted">{page === 'documents' ? 'Keep organization documents together in a dedicated section.' : 'Keep organization records together in a dedicated section.'}</p>
-          <div className="info-note"><LockKeyhole size={18} /><p>Storage is not enabled yet. {page === 'documents' ? 'Document upload, download and retention settings will be configured here.' : 'Record fields and save options will be configured here.'} No data is being stored on this page.</p></div>
+        {page === 'documents' && <Documents key={`${organizationId}:${me.user.id}`} organizationId={organizationId} userId={me.user.id} />}
+        {page === 'details' && <section className="panel settings-panel">
+          <span className="feature-icon">{<Database size={28} />}</span>
+          <h2>Details workspace</h2>
+          <p className="muted">Keep organization records together in a dedicated section.</p>
+          <div className="info-note"><LockKeyhole size={18} /><p>Storage is not enabled yet. Record fields and save options will be configured here. No data is being stored on this page.</p></div>
         </section>}
         {page === 'network' && <>
           <div className="info-note"><Network size={18} /><p>Controls apply to registered hosts with the required agent capabilities. This page does not automatically protect every device on your local network.</p></div>
