@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Server, Plus, Copy, X, RefreshCw, ShieldCheck, KeyRound } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { type InventoryRecord, type Group, percent } from './telemetry';
-import ServerDrawer from './server-drawer';
+import ServerDetails from './server-details';
 
 type ServerRecord = InventoryRecord;
 type Enrollment = { serverId: string; enrollmentToken: string; expiresAt: string };
@@ -83,12 +83,15 @@ export default function Servers({ organizationId, canManage, onChanged, onSessio
     });
   }
 
+  const selectedServer = servers.find(server => server.id === selected);
+  if (selectedServer) return <><ServerDetails organizationId={organizationId} server={selectedServer} groups={groups} canManage={canManage} onClose={() => setSelected(null)} onUpdated={() => reload()} onError={failure} />{error && <div className="message error" role="alert">{error}</div>}</>;
+
   return <>
     <form className="inventory-filters" onSubmit={event => { event.preventDefault(); const form = new FormData(event.currentTarget); setSelected(null); setCursors([null]); setQuery(new URLSearchParams(Array.from(form.entries()).filter(([, value]) => !!value) as [string, string][]).toString()); }}>
       <input name="q" placeholder="Search hostnames" aria-label="Search hostnames" maxLength={100} /><select name="os" aria-label="Operating system"><option value="">All operating systems</option><option>LINUX</option><option>WINDOWS</option></select><select name="status" aria-label="Agent status"><option value="">All statuses</option>{['ONLINE', 'STALE', 'UNKNOWN', 'PENDING_ENROLLMENT', 'AWAITING_HEARTBEAT', 'REVOKED_OR_EXPIRED', 'DECOMMISSIONED'].map(status => <option key={status}>{status}</option>)}</select><select name="groupId" aria-label="Server group"><option value="">All groups</option>{groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select><button className="button secondary">Apply filters</button>
     </form>
     {canManage && <form className="inventory-filters" onSubmit={event => { event.preventDefault(); const formElement = event.currentTarget; const name = new FormData(formElement).get('name'); void action(async () => { await api(`/organizations/${organizationId}/groups`, 'POST', { name }); formElement.reset(); await reload(); }); }}><input name="name" required maxLength={80} placeholder="New server group" aria-label="New server group name" /><button className="button secondary" disabled={busy}>Create group</button></form>}
-    {selected && servers.find(server => server.id === selected) && <ServerDrawer key={selected} organizationId={organizationId} server={servers.find(server => server.id === selected)!} groups={groups} canManage={canManage} onClose={() => setSelected(null)} onUpdated={() => reload()} onError={failure} />}
+
     {error && <div className="message error" role="alert">{error}<button aria-label="Dismiss server error" onClick={() => setError('')}><X size={16} /></button></div>}
     {notice && <div className="message success" role="status">{notice}</div>}
     <section className="panel"><div className="panel-heading"><div><h2>Registered servers · this page <span className="count">{servers.filter(server => !server.decommissioned_at).length}</span></h2><p>Signed heartbeats every 30 seconds · view refreshes every 10 seconds · paginated inventory</p></div><div className="button-row"><button className="button secondary compact" disabled={busy} onClick={() => action(() => reload())} aria-label="Refresh servers"><RefreshCw size={15} /></button>{canManage && <button className="button primary compact" disabled={busy} onClick={() => { setCreate(true); setError(''); }}><Plus size={16} /> Register server</button>}</div></div>
