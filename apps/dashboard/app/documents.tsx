@@ -13,7 +13,7 @@ export default function Documents({organizationId,userId}:{organizationId:string
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[progress,setProgress]=useState(''),[page,setPage]=useState(0);
  const [minutes,setMinutes]=useState<1|30>(1),[link,setLink]=useState<{url:string;expires:string}|null>(null),[selected,setSelected]=useState<Document|null>(null),[links,setLinks]=useState<Share[]>([]);
  const alive=useRef(true),generation=useRef(0),fileInput=useRef<HTMLInputElement>(null);
- useEffect(()=>{alive.current=true; void api<Vault|null>(`${base}/vault`).then(setVault).catch(e=>setError(e.message)); return()=>{alive.current=false;generation.current++;};},[base]);
+ useEffect(()=>{alive.current=true; void api<{vault:Vault|null}>(`${base}/vault`).then(data=>setVault(data.vault)).catch(e=>setError(e.message)); return()=>{alive.current=false;generation.current++;};},[base]);
  function lock(){generation.current++;setMaster(null);setRows([]);setLink(null);setSelected(null);setLinks([]);setNotice('Vault locked');}
  useEffect(()=>{if(!master)return;const timer=setTimeout(lock,10*60*1000);return()=>clearTimeout(timer);},[master]);
  async function work(fn:()=>Promise<void>){setBusy(true);setError('');setNotice('');try{await fn();}catch(e){if(alive.current)setError(e instanceof Error?e.message:'Operation failed');}finally{if(alive.current){setBusy(false);setProgress('');}}}

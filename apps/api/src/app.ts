@@ -59,7 +59,7 @@ class ApiController {
   @Post('organizations/:id/firewall/policies/:policyId/versions/:versionId/submit') async submitPolicy(@Req() request: Request, @Param('id') id: string, @Param('policyId') policyId: string, @Param('versionId') versionId: string, @Body() body: unknown) { return this.firewall.submit(await this.service.authenticate(request), id, policyId, versionId, body); }
   @Get('organizations/:id/firewall/policies/:policyId/history') async policyHistory(@Req() request: Request, @Param('id') id: string, @Param('policyId') policyId: string, @Query() query: unknown) { return this.firewall.history(await this.service.authenticate(request), id, policyId, query); }
 
-  @Get('organizations/:id/documents/vault') async documentVault(@Req() req: Request, @Param('id') id: string) { return this.documents.vault(await this.service.authenticate(req),id); }
+  @Get('organizations/:id/documents/vault') async documentVault(@Req() req: Request, @Param('id') id: string) { return { vault: await this.documents.vault(await this.service.authenticate(req),id) }; }
   @Post('organizations/:id/documents/vault') async createDocumentVault(@Req() req: Request, @Param('id') id: string, @Body() body: unknown) { return this.documents.createVault(await this.service.authenticate(req),id,body); }
   @Get('organizations/:id/documents') async documentList(@Req() req: Request, @Param('id') id: string) { return this.documents.list(await this.service.authenticate(req),id); }
   @Post('organizations/:id/documents') async createDocument(@Req() req: Request, @Param('id') id: string, @Body() body: unknown) { return this.documents.create(await this.service.authenticate(req),id,body); }

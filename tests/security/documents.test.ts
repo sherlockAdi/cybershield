@@ -78,11 +78,15 @@ test('document HTTP endpoints enforce authentication, CSRF, origin, chunk body l
   const call=(path:string,body?:unknown,override:Record<string,string>={})=>fetch(`${base}/api${path}`,{method:body===undefined?'GET':'POST',headers:{...headers,...override},body:body===undefined?undefined:JSON.stringify(body)});
   const path=`/organizations/${org}/documents`;
   assert.equal((await call(path,undefined,{Cookie:''})).status,401);
+  const emptyVault=await call(`${path}/vault`);
+  assert.equal(emptyVault.status,200);
+  assert.deepEqual(await emptyVault.json(),{vault:null},'new users must receive explicit JSON so the create form is shown');
   const wrapped={iv:encode(new Uint8Array(12)),data:encode(new Uint8Array(48))};
   const vault={salt:encode(new Uint8Array(16)),wrappedKey:wrapped};
   assert.equal((await call(`${path}/vault`,vault,{'X-CSRF-Token':''})).status,403);
   assert.equal((await call(`${path}/vault`,vault,{Origin:'https://evil.example'})).status,403);
   assert.equal((await call(`${path}/vault`,vault)).status,201);
+  assert.deepEqual(await (await call(`${path}/vault`)).json(),{vault:{salt:vault.salt,wrapped_key:wrapped}},'existing vaults show unlock');
   assert.equal((await call(path,{id,wrappedKey:wrapped,metadata:wrapped,ciphertextSize:CHUNK,chunkCount:1})).status,201);
   const chunk={index:0,ciphertext:encode(new Uint8Array(CHUNK))};
   assert.equal((await call(`${path}/${id}/chunks`,chunk)).status,201,'64KB ciphertext survives the chunk-specific parser');
