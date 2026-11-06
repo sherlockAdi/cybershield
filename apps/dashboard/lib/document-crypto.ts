@@ -21,7 +21,7 @@ export async function seal(key: CryptoKey, bytes: Uint8Array<ArrayBuffer>, conte
 export async function open(key: CryptoKey, value: Envelope, context: string): Promise<Uint8Array<ArrayBuffer>> {
  return new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:decode(value.iv),additionalData:encoder.encode(context)},key,decode(value.data)));
 }
-export type FileMetadata = {name:string;size:number;iv:string};
+export type FileMetadata = {name:string;size:number;iv:string;kind?:'record';format?:'text'|'json'};
 export async function readMetadata(key: CryptoKey, envelope: Envelope, id: string): Promise<FileMetadata> {
  const data=JSON.parse(new TextDecoder().decode(await open(key,envelope,`document:${id}:metadata:v1`)));
  if(typeof data.name!=='string'||data.name.length>255||!Number.isInteger(data.size)||data.size<1||data.size>MAX_FILE||typeof data.iv!=='string'||decode(data.iv).length!==12) throw new Error('Invalid encrypted metadata');

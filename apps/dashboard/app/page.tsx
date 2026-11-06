@@ -163,12 +163,7 @@ export default function Home() {
       {error && <div className="message error" role="alert">{error}<button aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></button></div>}{notice && <div className="message success" role="status">{notice}<button aria-label="Dismiss notification" onClick={() => setNotice('')}><X size={16} /></button></div>}
       {loading ? <div className="loading-panel"><span className="spinner" /> Loading organization…</div> : !organization ? <section className="panel empty"><Building2 size={32} /><h2>Create or join an organization</h2><p>Your account is ready. Choose where you want to work.</p><div className="button-row"><button className="button primary" onClick={() => setModal('create')}>Create organization</button><button className="button secondary" onClick={() => setModal('join')}>Join with a token</button></div></section> : <>
         {page === 'documents' && <Documents key={`${organizationId}:${me.user.id}`} organizationId={organizationId} userId={me.user.id} />}
-        {page === 'details' && <section className="panel settings-panel">
-          <span className="feature-icon">{<Database size={28} />}</span>
-          <h2>Details workspace</h2>
-          <p className="muted">Keep organization records together in a dedicated section.</p>
-          <div className="info-note"><LockKeyhole size={18} /><p>Storage is not enabled yet. Record fields and save options will be configured here. No data is being stored on this page.</p></div>
-        </section>}
+        {page === 'details' && <Documents key={`records:${organizationId}:${me.user.id}`} organizationId={organizationId} userId={me.user.id} records />}
         {page === 'network' && <>
           <div className="info-note"><Network size={18} /><p>Controls apply to registered hosts with the required agent capabilities. This page does not automatically protect every device on your local network.</p></div>
           <section className="organization-grid section-gap">{[

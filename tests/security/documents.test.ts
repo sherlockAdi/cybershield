@@ -99,3 +99,16 @@ test('document HTTP endpoints enforce authentication, CSRF, origin, chunk body l
   assert.equal((await call(`${path}/${id}/links`,{minutes:0})).status,400);
  }finally{await app.close();await db.close();}
 });
+
+test('data records preserve exact Unicode and JSON through encrypted storage strings',async()=>{
+ for(const text of ['नाम: आयशा\n<script>alert(1)</script>', '{\n  "name": "Ayesha", "active": true\n}']){
+  const id=randomUUID(),key=await importKey(randomKey()),clear=new TextEncoder().encode(text);
+  const result=await encryptFile(key,clear.buffer,id);
+  const metadata=await seal(key,new TextEncoder().encode(JSON.stringify({name:'Private record',size:clear.length,iv:result.iv,kind:'record',format:'text'})),`document:${id}:metadata:v1`);
+  const meta=await readMetadata(key,metadata,id);assert.equal(meta.kind,'record');
+  const strings=[encode(result.ciphertext)];assert.equal(strings[0].includes(text),false);
+  const stored=await collect(1,result.ciphertext.length,async index=>({ciphertext:strings[index]}));
+  assert.equal(new TextDecoder().decode(await decryptFile(key,stored,meta,id)),text);
+  await assert.rejects(decryptFile(await importKey(randomKey()),stored,meta,id));
+ }
+});
