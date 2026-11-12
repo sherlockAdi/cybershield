@@ -81,6 +81,17 @@ try{
     if(-not $Healthy){throw 'Updated agent did not acknowledge a control-plane heartbeat'}
     [string]$Manifest.generation | Set-Content -LiteralPath $Clock
     Copy-Item -LiteralPath (Join-Path $Install 'AutoUpdate.ps1') -Destination (Join-Path $Root 'AutoUpdate.ps1') -Force
+    $ScreenRoot=Join-Path $env:ProgramData 'CyberShieldScreenCapture'
+    if(Test-Path $ScreenRoot){
+        $ScreenItem=Get-Item -LiteralPath $ScreenRoot
+        $ScreenAcl=Get-Acl -LiteralPath $ScreenRoot
+        $ScreenOwner=$ScreenAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+        $Unsafe=@($ScreenAcl.Access | Where-Object {$_.AccessControlType -eq 'Allow' -and $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -notin @('S-1-5-18','S-1-5-32-544') -and ([int]$_.FileSystemRights -band [int][Security.AccessControl.FileSystemRights]::Write) -ne 0})
+        $ScreenScript=Join-Path $ScreenRoot 'Start-ScreenSharing.ps1'
+        if($ScreenOwner -in @('S-1-5-18','S-1-5-32-544') -and -not($ScreenItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $Unsafe.Count -eq 0 -and (Test-Path $ScreenScript) -and -not((Get-Item $ScreenScript).Attributes -band [IO.FileAttributes]::ReparsePoint)){
+            Copy-Item -LiteralPath (Join-Path $Install 'Start-ScreenSharing.ps1') -Destination $ScreenScript -Force
+        }
+    }
     Remove-Item -LiteralPath $Backup -Recurse -Force
     $Moved=$false
     'SUCCESS '+$Manifest.version | Set-Content (Join-Path $Root 'update-status.txt')

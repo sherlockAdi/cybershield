@@ -260,15 +260,21 @@ internal sealed class AgentWorker(AgentOptions options, ILogger<AgentWorker> log
         store.Save();
         var collector = new TelemetryCollector();
         var backoffSeconds = 5;
+        var nextHeartbeat = DateTimeOffset.MinValue;
         while (!cancellationToken.IsCancellationRequested)
         {
-            var delay = TimeSpan.FromSeconds(30);
+            var delay = TimeSpan.FromSeconds(1);
             try
             {
+                if (!options.Once && DateTimeOffset.UtcNow < nextHeartbeat) {
+                    await ScreenCapture.Tick(options,store,client,cancellationToken);
+                    await Task.Delay(TimeSpan.FromSeconds(1),cancellationToken);
+                    continue;
+                }
                 store.ImportEvents(options.EventsFile);
                 if (string.IsNullOrEmpty(state.CredentialId))
                 {
-                    var response = await Send(client, store.Key, "/api/agent/v1/enroll", new { schemaVersion = 1, serverId = state.ServerId, token = store.ReadToken(options.TokenFile), publicKey = store.Key.ExportSubjectPublicKeyInfoPem(), hostname = Environment.MachineName, os = "WINDOWS", osVersion = OSVersion(), agentVersion = "1.1.0-device" }, cancellationToken);
+                    var response = await Send(client, store.Key, "/api/agent/v1/enroll", new { schemaVersion = 1, serverId = state.ServerId, token = store.ReadToken(options.TokenFile), publicKey = store.Key.ExportSubjectPublicKeyInfoPem(), hostname = Environment.MachineName, os = "WINDOWS", osVersion = OSVersion(), agentVersion = "1.2.0-device" }, cancellationToken);
                     if (response.GetProperty("serverId").GetString() != state.ServerId || !Guid.TryParse(response.GetProperty("credentialId").GetString(), out var credentialId)) throw new InvalidOperationException("Enrollment response identity mismatch");
                     state.CredentialId = credentialId.ToString("D");
                     state.ExpiresAt = response.GetProperty("expiresAt").GetString() ?? "";
@@ -278,14 +284,15 @@ internal sealed class AgentWorker(AgentOptions options, ILogger<AgentWorker> log
                 if (state.Sequence >= 9007199254740991) throw new InvalidOperationException("Sequence exhausted; new enrollment required");
                 state.Sequence++;
                 store.Save();
-                var heartbeat = await Send(client, store.Key, "/api/agent/v1/heartbeat", new { schemaVersion = 1, serverId = state.ServerId, credentialId = state.CredentialId, sequence = state.Sequence, hostname = Environment.MachineName, os = "WINDOWS", osVersion = OSVersion(), agentVersion = "1.1.0-device", uptimeSeconds = Math.Max(0, Environment.TickCount64 / 1000), inventory = new { architecture = RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(), logicalCpuCount = Environment.ProcessorCount }, metrics = collector.Collect(), management = await Management.Report(options,state,cancellationToken), deviceAudit = await DeviceAudit.Report(options,cancellationToken), devicePolicyVersion = options.DevicePolicyHelper is null ? (int?)null : 1, devicePolicyResult = state.DevicePolicyResult }, cancellationToken);
+                var heartbeat = await Send(client, store.Key, "/api/agent/v1/heartbeat", new { schemaVersion = 1, serverId = state.ServerId, credentialId = state.CredentialId, sequence = state.Sequence, hostname = Environment.MachineName, os = "WINDOWS", osVersion = OSVersion(), agentVersion = "1.2.0-device", uptimeSeconds = Math.Max(0, Environment.TickCount64 / 1000), inventory = new { architecture = RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(), logicalCpuCount = Environment.ProcessorCount }, metrics = collector.Collect(), management = await Management.Report(options,state,cancellationToken), deviceAudit = await DeviceAudit.Report(options,cancellationToken), devicePolicyVersion = options.DevicePolicyHelper is null ? (int?)null : 1, devicePolicyResult = state.DevicePolicyResult }, cancellationToken);
                 if (!heartbeat.GetProperty("accepted").GetBoolean() || heartbeat.GetProperty("serverId").GetString() != state.ServerId || heartbeat.GetProperty("acceptedSequence").GetInt64() != state.Sequence) throw new InvalidOperationException("Heartbeat response mismatch");
+                try { ScreenCapture.Configure(heartbeat); } catch (Exception error) { ScreenCapture.Disable(); logger.LogWarning("Screen sharing helper unavailable ({ErrorType})", error.GetType().Name); }
                 await Management.Execute(options,store,heartbeat,cancellationToken);
                 await DevicePolicy.Execute(options,store,heartbeat,cancellationToken);
                 var releaseFile = Path.Combine(AppContext.BaseDirectory,"release-version.txt");
                 if (File.Exists(releaseFile)) File.WriteAllText(Path.Combine(options.StateDirectory,"update-health.json"), JsonSerializer.Serialize(new { version=File.ReadAllText(releaseFile).Trim(), acceptedAt=DateTimeOffset.UtcNow }));
                 var interval = heartbeat.GetProperty("heartbeatIntervalSeconds").GetInt32();
-                if (interval is >= 10 and <= 300) delay = TimeSpan.FromSeconds(interval);
+                nextHeartbeat = DateTimeOffset.UtcNow.AddSeconds(interval is >= 10 and <= 300 ? interval : 30);
                 logger.LogInformation("Heartbeat accepted (sequence {Sequence})", state.Sequence);
                 if (state.PendingEvents.Count > 0)
                 {
@@ -318,7 +325,7 @@ internal sealed class AgentWorker(AgentOptions options, ILogger<AgentWorker> log
 
     private static string OSVersion() { var value = RuntimeInformation.OSDescription; return value.Length <= 100 ? value : value[..100]; }
 
-    private static async Task<JsonElement> Send(HttpClient client, ECDsa key, string endpoint, object value, CancellationToken cancellationToken)
+    internal static async Task<JsonElement> Send(HttpClient client, ECDsa key, string endpoint, object value, CancellationToken cancellationToken)
     {
         var body = JsonSerializer.SerializeToUtf8Bytes(value);
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);

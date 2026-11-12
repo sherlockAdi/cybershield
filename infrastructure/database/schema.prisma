@@ -214,6 +214,10 @@ model Server {
   device_policy_report Json?
   device_policy_received_at DateTime? @db.Timestamptz(3)
   device_policy_supported Boolean @default(false)
+  screen_config Json @default("{\"enabled\":false,\"intervalSeconds\":5,\"revision\":0}")
+  screen_ciphertext String?
+  screen_captured_at DateTime? @db.Timestamptz(3)
+  screen_received_at DateTime? @db.Timestamptz(3)
   device_config Json?
   device_revision Int @default(0)
   device_snapshot Json?

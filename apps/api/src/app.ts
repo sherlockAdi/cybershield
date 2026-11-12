@@ -16,6 +16,7 @@ import { RolloutService } from './rollouts';
 import { DetectionService } from './detections';
 import { HostManagementService } from './host-management';
 import { ActivityService } from './activity';
+import { ScreenshotService } from './screenshots';
 import { DeviceService } from './devices';
 import { DocumentService } from './documents';
 
@@ -32,7 +33,7 @@ class SafeErrors implements ExceptionFilter {
 
 @Controller('api')
 class ApiController {
-  constructor(@Inject(DeviceService) private readonly devices: DeviceService, @Inject(DocumentService) private readonly documents: DocumentService, @Inject(HostManagementService) private readonly management: HostManagementService, @Inject(ControlService) private readonly service: ControlService, @Inject(AgentService) private readonly agents: AgentService, @Inject(TelemetryService) private readonly telemetry: TelemetryService, @Inject(FirewallService) private readonly firewall: FirewallService, @Inject(RolloutService) private readonly rollouts: RolloutService, @Inject(DetectionService) private readonly detections: DetectionService, @Inject(ActivityService) private readonly activity: ActivityService) {}
+  constructor(@Inject(ScreenshotService) private readonly screenshots: ScreenshotService, @Inject(DeviceService) private readonly devices: DeviceService, @Inject(DocumentService) private readonly documents: DocumentService, @Inject(HostManagementService) private readonly management: HostManagementService, @Inject(ControlService) private readonly service: ControlService, @Inject(AgentService) private readonly agents: AgentService, @Inject(TelemetryService) private readonly telemetry: TelemetryService, @Inject(FirewallService) private readonly firewall: FirewallService, @Inject(RolloutService) private readonly rollouts: RolloutService, @Inject(DetectionService) private readonly detections: DetectionService, @Inject(ActivityService) private readonly activity: ActivityService) {}
   @Get('organizations/:id/servers/:serverId/activity') async serverActivity(@Req() request: Request, @Param('id') id: string, @Param('serverId') serverId: string, @Query() query: unknown) { return this.activity.report(await this.service.authenticate(request), id, serverId, query); }
 
   @Get('organizations/:id/security/settings') async detectionSettings(@Req() request: Request, @Param('id') id: string) { return this.detections.config(await this.service.authenticate(request), id); }
@@ -77,6 +78,9 @@ class ApiController {
   @Get('organizations/:id/devices') async deviceList(@Req() req: Request, @Param('id') id: string, @Query() query: unknown) { return this.devices.list(await this.service.authenticate(req),id,query); }
   @Get('organizations/:id/devices/:device') async deviceDetail(@Req() req: Request, @Param('id') id: string, @Param('device') device: string) { return this.devices.read(await this.service.authenticate(req),id,device); }
   @Patch('organizations/:id/devices/:device') async deviceSave(@Req() req: Request, @Param('id') id: string, @Param('device') device: string, @Body() body: unknown) { return this.devices.save(await this.service.authenticate(req),id,device,body); }
+  @Get('organizations/:id/devices/:device/screenshots') async screenshotRead(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Param('id') id: string, @Param('device') device: string) { res.setHeader('Cache-Control','no-store'); return this.screenshots.read(await this.service.authenticate(req),id,device); }
+  @Patch('organizations/:id/devices/:device/screenshots') async screenshotConfig(@Req() req: Request, @Param('id') id: string, @Param('device') device: string, @Body() body: unknown) { return this.screenshots.configure(await this.service.authenticate(req),id,device,body); }
+  @Post('agent/v1/screenshot') async screenshotUpload(@Req() req: AgentRequest) { return this.screenshots.ingest(req); }
   @Get('health') health() { return { status: 'ok', milestone: 'week-8-detections', database: this.service.db.mode }; }
   @Post('agent/v1/events') ingestEvents(@Req() request: AgentRequest) { return this.telemetry.ingest(request); }
   @Get('organizations/:id/inventory') async inventory(@Req() request: Request, @Param('id') id: string, @Query() query: unknown) { return this.telemetry.inventory(await this.service.authenticate(request), id, query); }
@@ -117,7 +121,7 @@ class ApiController {
 
 export async function createApp(database?: Database) {
   const db = database || await new Database().open();
-  @Module({ controllers: [ApiController], providers: [{ provide: Database, useValue: db }, ControlService, AgentService, TelemetryService, FirewallService, RolloutService, DetectionService, ActivityService, HostManagementService, DocumentService, DeviceService] })
+  @Module({ controllers: [ApiController], providers: [{ provide: Database, useValue: db }, ControlService, AgentService, TelemetryService, FirewallService, RolloutService, DetectionService, ActivityService, HostManagementService, DocumentService, DeviceService, ScreenshotService] })
   class AppModule {}
   const app = await NestFactory.create(AppModule, { logger: ['error', 'warn'], bodyParser: false });
   app.use(helmet());
@@ -147,7 +151,7 @@ export async function createApp(database?: Database) {
   const heartbeatJson = express.json({ limit: '256kb', verify: rawBody });
   const documentJson = express.json({ limit: '70kb' });
   const eventsJson = express.json({ limit: '64kb', verify: rawBody });
-  app.use((request: Request, response: Response, next: NextFunction) => (request.method === 'POST' && /^\/api\/organizations\/[0-9a-f-]{36}\/documents\/[0-9a-f-]{36}\/chunks$/.test(request.path) ? documentJson : request.originalUrl === '/api/agent/v1/events' ? eventsJson : request.originalUrl === '/api/agent/v1/heartbeat' ? heartbeatJson : normalJson)(request, response, next));
+  app.use((request: Request, response: Response, next: NextFunction) => (request.method === 'POST' && /^\/api\/organizations\/[0-9a-f-]{36}\/documents\/[0-9a-f-]{36}\/chunks$/.test(request.path) ? documentJson : request.originalUrl === '/api/agent/v1/events' ? eventsJson : ['/api/agent/v1/heartbeat','/api/agent/v1/screenshot'].includes(request.originalUrl) ? heartbeatJson : normalJson)(request, response, next));
   app.useGlobalFilters(new SafeErrors());
   app.enableShutdownHooks();
   return { app, db };

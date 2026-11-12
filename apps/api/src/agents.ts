@@ -108,6 +108,7 @@ export class AgentService {
       await client.query('UPDATE agent_credentials SET revoked_at=now() WHERE organization_id=$1 AND server_id=$2 AND revoked_at IS NULL', [organizationId, serverId]);
       await client.query('UPDATE enrollment_tokens SET revoked_at=now() WHERE organization_id=$1 AND server_id=$2 AND revoked_at IS NULL', [organizationId, serverId]);
       if (decommission) await client.query('UPDATE servers SET decommissioned_at=now() WHERE organization_id=$1 AND id=$2', [organizationId, serverId]);
+      await client.query("UPDATE servers SET screen_ciphertext=NULL,screen_captured_at=NULL,screen_config=jsonb_set(screen_config,'{enabled}','false'::jsonb) WHERE organization_id=$1 AND id=$2",[organizationId,serverId]);
       await this.control.audit(client, organizationId, actor.id, decommission ? 'server.decommissioned' : 'agent.credentials_revoked', serverId);
     });
     return { ok: true };
@@ -141,7 +142,7 @@ export class AgentService {
       await client.query('UPDATE agent_credentials SET revoked_at=now() WHERE organization_id=$1 AND server_id=$2 AND revoked_at IS NULL', [organizationId, data.serverId]);
       await client.query('INSERT INTO agent_credentials (id,organization_id,server_id,public_key_pem,key_fingerprint,expires_at) VALUES ($1,$2,$3,$4,$5,$6)', [credentialId, organizationId, data.serverId, key.export({ format: 'pem', type: 'spki' }).toString(), fingerprint, expiresAt]);
       await client.query('UPDATE enrollment_tokens SET consumed_at=now(),credential_id=$2 WHERE id=$1', [enrollment.id, credentialId]);
-      await client.query('UPDATE servers SET hostname=$3,os_version=$4,agent_version=$5,last_heartbeat_at=NULL,uptime_seconds=NULL,management_snapshot=NULL,management_received_at=NULL,device_snapshot=NULL,device_received_at=NULL,device_policy_report=NULL,device_policy_supported=false,device_policy_received_at=NULL,capabilities=$6::jsonb WHERE organization_id=$1 AND id=$2', [organizationId, data.serverId, data.hostname, data.osVersion, data.agentVersion, JSON.stringify({ heartbeat: true, firewall: false, execution: false })]);
+      await client.query(`UPDATE servers SET hostname=$3,os_version=$4,agent_version=$5,last_heartbeat_at=NULL,uptime_seconds=NULL,management_snapshot=NULL,management_received_at=NULL,device_snapshot=NULL,device_received_at=NULL,screen_ciphertext=NULL,screen_captured_at=NULL,screen_config=jsonb_set(screen_config,'{enabled}','false'::jsonb),device_policy_report=NULL,device_policy_supported=false,device_policy_received_at=NULL,capabilities=$6::jsonb WHERE organization_id=$1 AND id=$2`, [organizationId, data.serverId, data.hostname, data.osVersion, data.agentVersion, JSON.stringify({ heartbeat: true, firewall: false, execution: false })]);
       await this.control.audit(client, organizationId, null, 'agent.enrolled', data.serverId, { credentialId, fingerprint });
       return { credentialId, serverId: data.serverId, expiresAt, heartbeatIntervalSeconds: 30 };
     });
@@ -164,7 +165,9 @@ export class AgentService {
       }
       const command = data.management ? await acceptManagement(client, server.organization_id, data.serverId, data.credentialId, data.management) : null;
       const devicePolicy = await devicePolicyHeartbeat(client,server.organization_id,data.serverId,data.os === 'WINDOWS' && data.devicePolicyVersion === 1,data.devicePolicyResult);
-      return { devicePolicy, command, accepted: true, serverId: data.serverId, acceptedSequence: data.sequence, receivedAt: updated.rows[0].last_heartbeat_at, heartbeatIntervalSeconds: 30, credentialExpiresAt: credential.expires_at };
+      const screen = (await client.query('SELECT screen_config FROM servers WHERE id=$1 AND device_config IS NOT NULL',[data.serverId])).rows[0]?.screen_config ?? {enabled:false,intervalSeconds:5,revision:0};
+      if(screen.enabled){const authorized=await client.query("SELECT m.user_id FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.user_id=$2 AND m.role IN ('OWNER','ADMIN') AND u.disabled_at IS NULL",[server.organization_id,screen.requestedBy]);if(!authorized.rows.length)screen.enabled=false;}
+      return { screen, devicePolicy, command, accepted: true, serverId: data.serverId, acceptedSequence: data.sequence, receivedAt: updated.rows[0].last_heartbeat_at, heartbeatIntervalSeconds: 30, credentialExpiresAt: credential.expires_at };
     });
   }
 
