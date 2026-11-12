@@ -23,7 +23,7 @@ internal static class ScreenCapture
         config=null;validUntil=DateTimeOffset.UtcNow.AddSeconds(65);
         if(!Directory.Exists(Root))return; // Local administrator must provision the consent helper first.
         // The shared root must be admin-controlled; only its frames subdirectory is user-writable.
-        var owner=new DirectoryInfo(Root).GetAccessControl().GetOwner(typeof(SecurityIdentifier)).Value;
+        var owner=new DirectoryInfo(Root).GetAccessControl().GetOwner(typeof(SecurityIdentifier))?.Value;
         if(owner is not ("S-1-5-18" or "S-1-5-32-544"))throw new UnauthorizedAccessException("Screen helper root must be administrator-owned");
         var script=Path.Combine(Root,"Start-ScreenSharing.ps1");
         Management.ValidateHelper(script);
