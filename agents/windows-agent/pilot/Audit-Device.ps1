@@ -73,10 +73,29 @@ $Report = [ordered]@{
             Get-PnpDevice -PresentOnly | Where-Object {
                 $_.InstanceId -match '^(USB|USBSTOR|BTH|SWD\\WPDBUSENUM)\\' -or
                 $_.Class -in @('Keyboard', 'Mouse', 'Printer', 'PrintQueue', 'WPD', 'Bluetooth', 'Net', 'DiskDrive')
-            } | Select-Object -First 300 Status, Class, FriendlyName, InstanceId
+            } | Select-Object -First 100 Status, Class, FriendlyName, InstanceId
+        }
+        networkAddresses = Read-Section {
+            Get-NetIPAddress | Select-Object -First 100 InterfaceAlias, AddressFamily, IPAddress, PrefixLength, AddressState
+        }
+        tcpConnections = Read-Section {
+            Get-NetTCPConnection | Sort-Object State,RemoteAddress | Select-Object -First 100 LocalAddress,LocalPort,RemoteAddress,RemotePort,@{Name='State';Expression={[string]$_.State}},OwningProcess
+        }
+        udpEndpoints = Read-Section {
+            Get-NetUDPEndpoint | Select-Object -First 100 LocalAddress,LocalPort,OwningProcess
+        }
+        processes = Read-Section {
+            Get-Process | Sort-Object ProcessName | Select-Object -First 100 Id,ProcessName,CPU,WorkingSet64
         }
         disks = Read-Section {
             Get-Disk | Select-Object Number, FriendlyName, BusType, IsBoot, IsSystem, IsReadOnly
+        }
+        automaticUpdates = Read-Section {
+            $Task=Get-ScheduledTask -TaskName CyberShieldDeviceAutoUpdate
+            $Info=Get-ScheduledTaskInfo -TaskName CyberShieldDeviceAutoUpdate
+            $StatusFile=Join-Path $env:ProgramData 'CyberShieldDeviceAgent\update-status.txt'
+            $Status=if(Test-Path $StatusFile){Get-Content -Raw $StatusFile}else{'No update attempted yet'}
+            [pscustomobject]@{State=[string]$Task.State;LastRunTime=$Info.LastRunTime;LastTaskResult=$Info.LastTaskResult;NextRunTime=$Info.NextRunTime;UpdateStatus=$Status}
         }
         agentService = Read-Section {
             Get-CimInstance Win32_Service -Filter "Name='ServerGuardAgent'" |
@@ -84,7 +103,7 @@ $Report = [ordered]@{
         }
         services = Read-Section {
             Get-CimInstance Win32_Service | Sort-Object Name |
-                Select-Object -First 300 Name, DisplayName, State, StartMode
+                Select-Object -First 100 Name, DisplayName, State, StartMode
         }
         deviceInstallationPolicies = Read-Section {
             Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions' |
@@ -109,9 +128,9 @@ $Report = [ordered]@{
         'Employee mapping must be approved in the control plane; local usernames are not verified employees.',
         'Recent hotfixes and service state do not prove Windows is fully patched.',
         'Missing policy/provider returns UNKNOWN; it does not establish compliance.',
-        'Peripheral and service sections are limited to 300 entries each.',
+        'Peripheral and service sections are limited to 100 entries each.',
         'Machine screen-lock policy does not cover every per-user or domain policy.',
         'Report contains account names and hardware identifiers; share only with the pilot administrator.'
     )
 }
-$Report | ConvertTo-Json -Depth 8
+$Report | ConvertTo-Json -Depth 8 -Compress

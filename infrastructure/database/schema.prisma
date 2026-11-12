@@ -209,6 +209,11 @@ model Invitation {
 }
 
 model Server {
+  device_policy_requested Boolean @default(false)
+  device_policy_actor String? @db.Uuid
+  device_policy_report Json?
+  device_policy_received_at DateTime? @db.Timestamptz(3)
+  device_policy_supported Boolean @default(false)
   device_config Json?
   device_revision Int @default(0)
   device_snapshot Json?

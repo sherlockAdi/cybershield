@@ -7,7 +7,8 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { Database } from './database';
 import { ControlService } from './service';
-import { origin } from './config';
+import { origin, root } from './config';
+import path from 'node:path';
 import { AgentService, AgentRequest } from './agents';
 import { TelemetryService } from './telemetry';
 import { FirewallService } from './firewall';
@@ -141,6 +142,7 @@ export async function createApp(database?: Database) {
     next();
   });
   const rawBody = (request: express.Request, _response: express.Response, buffer: Buffer) => { (request as AgentRequest).rawBody = Buffer.from(buffer); };
+  app.use('/api/agent/v1/releases', express.static(path.join(root, 'agent-release'), { index: false, dotfiles: 'deny', fallthrough: false, maxAge: 0, redirect: false }));
   const normalJson = express.json({ limit: '16kb', verify: rawBody });
   const heartbeatJson = express.json({ limit: '256kb', verify: rawBody });
   const documentJson = express.json({ limit: '70kb' });

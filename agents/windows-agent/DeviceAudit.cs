@@ -21,9 +21,12 @@ internal static class DeviceAudit
         }
         catch (Exception error) when (error is not OperationCanceledException || !token.IsCancellationRequested)
         {
-            // Stop sending old data on collector failure. Control plane retains its
-            // receipt timestamp, so unavailable audit becomes visibly stale.
-            cached = null;
+            cached = JsonSerializer.SerializeToElement(new {
+                schemaVersion=1, collectedAt=DateTimeOffset.UtcNow.ToString("O"), mode="AUDIT_ONLY",
+                computerName=Environment.MachineName, employeeMapping="NOT_CONFIGURED", deviceIdentity="SIGNED_AGENT",
+                sections=new Dictionary<string,object> { ["collector"]=new {status="UNKNOWN",data=Array.Empty<object>(),error=error.GetType().Name} },
+                limitations=new[]{"Audit helper failed. Check Windows script execution policy, package files and agent Event Viewer logs."}
+            });
         }
         return cached;
     }

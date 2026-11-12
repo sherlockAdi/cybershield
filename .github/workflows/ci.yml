@@ -64,6 +64,24 @@ jobs:
       - run: go test ./...
         working-directory: agents/linux-agent
       - run: node scripts/run.mjs test
+      - name: Validate Windows scripts and policy transitions
+        shell: powershell
+        run: |
+          Get-ChildItem agents/windows-agent/pilot/*.ps1 | ForEach-Object {
+            $tokens=$null; $errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$errors) | Out-Null
+            if($errors.Count){throw ($errors | Out-String)}
+          }
+          ./tests/windows/device-policy.ps1
+      - name: Package signed Windows device update
+        shell: pwsh
+        env:
+          DEVICE_UPDATE_SIGNING_KEY: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.DEVICE_UPDATE_SIGNING_KEY || '' }}
+        run: ./scripts/package-windows-agent.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-device-release
+          path: agent-release/
   deploy:
     name: Deploy frontend backend and migrations
     needs: [verify, linux-agent, windows-agent]
@@ -80,6 +98,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-device-release
+          path: agent-release
       - name: Configure pinned SSH connection
         env:
           DEPLOY_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
@@ -103,7 +125,9 @@ jobs:
             echo "Skipping superseded commit $GITHUB_SHA"
             exit 0
           fi
+          test -s agent-release/manifest.json
           git archive --format=tar HEAD > "$RUNNER_TEMP/release.tar"
+          tar --append --file="$RUNNER_TEMP/release.tar" agent-release
           ssh -T -i "$HOME/.ssh/cybershield_deploy" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \

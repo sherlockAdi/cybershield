@@ -36,3 +36,45 @@ Security tests cover tenant/role isolation, optional mapping, foreign-member
 rejection, revision conflicts, pagination, signatures, replay, stale audit and
 revocation. Windows CI compiles/parses/runs an audit. Actual SCM installation,
 reboot/DPAPI continuity and uninstall still require the owner's pilot laptop.
+
+## Online policies and automatic updates (1.1)
+
+The updated agent enables the host-management helper (service inventory and IP
+rules; service stops still require the local allowlist), plus IP address/TCP/UDP
+and process snapshots. Missing collectors report UNKNOWN. Network snapshots are
+capped at 100 rows per section and displayed ten at a time, not full traffic logs.
+
+**Save and apply** queues the next revision for a policy-capable Windows agent.
+Delivery is on the next 30-second heartbeat and acknowledgement normally on the
+following heartbeat. The agent rechecks the policy about every two minutes.
+Previously saved drafts remain drafts until explicitly applied. Each control
+returns a verified result, failure, unsupported or pending-restart status. Server
+save alone never changes the device status to applied. Stale/offline agents show
+stale results; new revisions remain pending until reconnection.
+
+Implemented controls: enable/verify Windows Firewall and Defender real-time AV;
+write/read back native removable-disk block/read-only policy and inactivity lock.
+Storage/lock retain PENDING_RESTART until native acceptance is performed; existing
+handles/fixed USB disks/session behavior must be tested. Storage AUDIT removes
+only CyberShield-owned values; externally changed/GPO values are not overwritten.
+Domain/Home policy deployments are rejected by this pilot. No keyboard/mouse is
+disabled. Per-device storage exceptions, Bluetooth/MTP/printer/network-adapter
+blocking remain unsupported. BitLocker is checked but never enabled without
+recovery-key escrow. Unchecking antivirus/firewall does not disable protections.
+
+Existing installs must run Update-Service.ps1 once as administrator, preserving
+DPAPI keys, server UUID and sequences. This enables a SYSTEM scheduled updater
+checking the same HTTPS origin every 15 minutes. Main production CI builds the
+Windows package after tests, signs the manifest with the repository signing secret,
+and deploys the manifest/ZIP with the app. Companion repository builds provide
+manual bootstrap packages; the production feed is published by the main control
+plane pipeline, not every unreviewed standalone build.
+
+The updater pins the RSA public key, verifies the manifest signature and SHA-256,
+rejects redirects/foreign paths, stale generations and unsafe archive entries,
+backs up binaries, restarts the same service and waits for a successful signed
+heartbeat marker. Failure restores the prior binaries and suppresses that failed
+version. No GitHub token is stored on a laptop. Old state remains untouched. The
+updater reports task/status in the security audit. Signing-key rotation needs a
+separate planned trust transition. SCM update/rollback remains a pilot acceptance
+gate even after CI passes; do not claim it has run on a customer device.

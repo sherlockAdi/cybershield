@@ -24,3 +24,5 @@ artifacts/
 *.tsbuildinfo
 __pycache__/
 *.pyc
+
+agent-release/

@@ -4,6 +4,7 @@ import { randomUUID, generateKeyPairSync, randomBytes, sign } from 'node:crypto'
 import { Database } from '../../apps/api/src/database';
 import { ControlService, Actor } from '../../apps/api/src/service';
 import { DeviceService } from '../../apps/api/src/devices';
+import { devicePolicyHeartbeat, policyStatus } from '../../apps/api/src/device-policy';
 import { AgentService, AgentRequest, signingMessage } from '../../apps/api/src/agents';
 
 test('device registration, drafts and signed audit enforce tenant/role/revision/credential boundaries', async () => {
@@ -46,6 +47,22 @@ test('device registration, drafts and signed audit enforce tenant/role/revision/
   assert.equal((await devices.read(actor,org,id)).device_snapshot.sections.firewall.status,'UNKNOWN');
   await assert.rejects(agents.heartbeat(request(1,audit)),/sequence/i);
   await assert.rejects(agents.heartbeat(request(2,{...audit,collectedAt:'2020-01-01T00:00:00Z'})),/recent/);
+  await devices.save(actor,org,id,{revision:1,config:{...initial.device_config,requireEncryption:false},apply:true});
+  const dispatch=await db.transaction(client=>devicePolicyHeartbeat(client,org,id,true));
+  assert.equal(dispatch?.revision,2);
+  const result={revision:2,status:'PARTIAL' as const,controls:[{name:'storage',status:'PENDING_RESTART' as const,message:'Reconnect storage'}]};
+  await db.transaction(client=>devicePolicyHeartbeat(client,org,id,true,result));
+  assert.equal((await devices.read(actor,org,id)).enforcement,'PARTIAL');
+  await db.transaction(client=>devicePolicyHeartbeat(client,org,id,true,result));
+  assert.equal((await db.query("SELECT id FROM audit_logs WHERE resource_id=$1 AND action='device.policy_result'",[id])).rows.length,1,'unchanged acknowledgement does not flood audit log');
+  await devices.save(actor,org,id,{revision:2,config:initial.device_config,apply:true});
+  await db.transaction(client=>devicePolicyHeartbeat(client,org,id,true,result));
+  assert.equal((await devices.read(actor,org,id)).enforcement,'PENDING','old acknowledgement cannot apply a new revision');
+  await db.query("UPDATE memberships SET role='VIEWER' WHERE organization_id=$1 AND user_id=$2",[org,user]);
+  assert.equal(await db.transaction(client=>devicePolicyHeartbeat(client,org,id,true)),null,'demoted requester cannot dispatch policy');
+  await db.query("UPDATE memberships SET role='OWNER' WHERE organization_id=$1 AND user_id=$2",[org,user]);
+  assert.equal(policyStatus({device_policy_requested:true,device_policy_supported:false}),'AGENT_UPGRADE_REQUIRED');
+  assert.equal(policyStatus({device_policy_requested:true,device_policy_supported:true,device_revision:1,device_policy_report:{revision:1,status:'APPLIED'},last_heartbeat_at:'2020-01-01'}),'STALE');
   await agents.revoke(actor,org,id);
   await assert.rejects(agents.heartbeat(request(2,audit)));
  } finally { await db.close(); }

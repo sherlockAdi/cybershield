@@ -6,6 +6,7 @@ import { Database, Row, Queryable } from './database';
 import { Actor, ControlService } from './service';
 import { input, uuid } from './input';
 import { digest, token } from './security';
+import { devicePolicyResultSchema, devicePolicyHeartbeat } from './device-policy';
 import { managementSchema, acceptManagement } from './host-management';
 import { inventorySchema, metricsSchema, recordMetrics } from './telemetry-model';
 
@@ -13,7 +14,7 @@ const hostname = z.string().trim().min(1).max(253).regex(/^[A-Za-z0-9][A-Za-z0-9
 const os = z.enum(['LINUX', 'WINDOWS']);
 const version = z.string().min(1).max(100);
 const enrollmentSchema = z.object({ schemaVersion: z.literal(1), serverId: uuid, token: z.string().min(32).max(100), publicKey: z.string().max(2048), hostname, os, osVersion: version, agentVersion: version }).strict();
-const heartbeatSchema = z.object({ schemaVersion: z.literal(1), serverId: uuid, credentialId: uuid, sequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER), hostname, os, osVersion: version, agentVersion: version, uptimeSeconds: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), inventory: inventorySchema.optional(), metrics: metricsSchema.optional(), management: managementSchema.nullish(), deviceAudit: z.object({ schemaVersion: z.literal(1), collectedAt: z.string().datetime({ offset: true }), mode: z.literal('AUDIT_ONLY'), computerName: z.string().max(253), employeeMapping: z.string().max(100), deviceIdentity: z.string().max(100), sections: z.record(z.string().regex(/^[A-Za-z][A-Za-z0-9]{0,59}$/), z.object({ status: z.enum(['OBSERVED', 'UNKNOWN']), data: z.array(z.unknown()).max(300), error: z.string().max(200).nullable() }).strict()).refine(value => Object.keys(value).length <= 30, 'Too many audit sections'), limitations: z.array(z.string().max(500)).max(20) }).strict().refine(value => Buffer.byteLength(JSON.stringify(value)) <= 100000, 'Device audit exceeds limit').nullish() }).strict();
+const heartbeatSchema = z.object({ schemaVersion: z.literal(1), serverId: uuid, credentialId: uuid, sequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER), hostname, os, osVersion: version, agentVersion: version, uptimeSeconds: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), inventory: inventorySchema.optional(), metrics: metricsSchema.optional(), management: managementSchema.nullish(), devicePolicyVersion: z.literal(1).nullish(), devicePolicyResult: devicePolicyResultSchema.nullish(), deviceAudit: z.object({ schemaVersion: z.literal(1), collectedAt: z.string().datetime({ offset: true }), mode: z.literal('AUDIT_ONLY'), computerName: z.string().max(253), employeeMapping: z.string().max(100), deviceIdentity: z.string().max(100), sections: z.record(z.string().regex(/^[A-Za-z][A-Za-z0-9]{0,59}$/), z.object({ status: z.enum(['OBSERVED', 'UNKNOWN']), data: z.array(z.unknown()).max(300), error: z.string().max(200).nullable() }).strict()).refine(value => Object.keys(value).length <= 30, 'Too many audit sections'), limitations: z.array(z.string().max(500)).max(20) }).strict().refine(value => Buffer.byteLength(JSON.stringify(value)) <= 100000, 'Device audit exceeds limit').nullish() }).strict();
 
 export type AgentRequest = Request & { rawBody?: Buffer };
 export function signingMessage(path: string, timestamp: string, nonce: string, rawBody: Buffer) {
@@ -140,7 +141,7 @@ export class AgentService {
       await client.query('UPDATE agent_credentials SET revoked_at=now() WHERE organization_id=$1 AND server_id=$2 AND revoked_at IS NULL', [organizationId, data.serverId]);
       await client.query('INSERT INTO agent_credentials (id,organization_id,server_id,public_key_pem,key_fingerprint,expires_at) VALUES ($1,$2,$3,$4,$5,$6)', [credentialId, organizationId, data.serverId, key.export({ format: 'pem', type: 'spki' }).toString(), fingerprint, expiresAt]);
       await client.query('UPDATE enrollment_tokens SET consumed_at=now(),credential_id=$2 WHERE id=$1', [enrollment.id, credentialId]);
-      await client.query('UPDATE servers SET hostname=$3,os_version=$4,agent_version=$5,last_heartbeat_at=NULL,uptime_seconds=NULL,management_snapshot=NULL,management_received_at=NULL,device_snapshot=NULL,device_received_at=NULL,capabilities=$6::jsonb WHERE organization_id=$1 AND id=$2', [organizationId, data.serverId, data.hostname, data.osVersion, data.agentVersion, JSON.stringify({ heartbeat: true, firewall: false, execution: false })]);
+      await client.query('UPDATE servers SET hostname=$3,os_version=$4,agent_version=$5,last_heartbeat_at=NULL,uptime_seconds=NULL,management_snapshot=NULL,management_received_at=NULL,device_snapshot=NULL,device_received_at=NULL,device_policy_report=NULL,device_policy_supported=false,device_policy_received_at=NULL,capabilities=$6::jsonb WHERE organization_id=$1 AND id=$2', [organizationId, data.serverId, data.hostname, data.osVersion, data.agentVersion, JSON.stringify({ heartbeat: true, firewall: false, execution: false })]);
       await this.control.audit(client, organizationId, null, 'agent.enrolled', data.serverId, { credentialId, fingerprint });
       return { credentialId, serverId: data.serverId, expiresAt, heartbeatIntervalSeconds: 30 };
     });
@@ -162,7 +163,8 @@ export class AgentService {
         await client.query('UPDATE servers SET device_snapshot=$3::jsonb,device_received_at=now() WHERE organization_id=$1 AND id=$2 AND device_config IS NOT NULL', [server.organization_id, data.serverId, JSON.stringify(data.deviceAudit)]);
       }
       const command = data.management ? await acceptManagement(client, server.organization_id, data.serverId, data.credentialId, data.management) : null;
-      return { command, accepted: true, serverId: data.serverId, acceptedSequence: data.sequence, receivedAt: updated.rows[0].last_heartbeat_at, heartbeatIntervalSeconds: 30, credentialExpiresAt: credential.expires_at };
+      const devicePolicy = await devicePolicyHeartbeat(client,server.organization_id,data.serverId,data.os === 'WINDOWS' && data.devicePolicyVersion === 1,data.devicePolicyResult);
+      return { devicePolicy, command, accepted: true, serverId: data.serverId, acceptedSequence: data.sequence, receivedAt: updated.rows[0].last_heartbeat_at, heartbeatIntervalSeconds: 30, credentialExpiresAt: credential.expires_at };
     });
   }
 
