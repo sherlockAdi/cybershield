@@ -12,6 +12,9 @@ internal static class Management
     {
         if (!Path.IsPathFullyQualified(filename)) throw new InvalidOperationException("Helper path must be absolute");
         var allowed = new HashSet<string> { WindowsIdentity.GetCurrent().User!.Value, "S-1-5-18", "S-1-5-32-544" };
+        // Windows servicing owns Program Files ancestors. Inherit-only ACEs do not
+        // grant access on the current path component.
+        allowed.Add(((SecurityIdentifier)new NTAccount("NT SERVICE", "TrustedInstaller").Translate(typeof(SecurityIdentifier))).Value);
         var depth = 0;
         for (FileSystemInfo? info = new FileInfo(filename); info is not null; info = info is FileInfo file ? file.Directory : ((DirectoryInfo)info).Parent)
         {
@@ -19,11 +22,11 @@ internal static class Management
             FileSystemSecurity acl = info is FileInfo f ? f.GetAccessControl() : ((DirectoryInfo)info).GetAccessControl();
             var writes = FileSystemRights.Delete | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership | (depth++ < 2 ? FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.WriteExtendedAttributes | FileSystemRights.WriteAttributes : FileSystemRights.DeleteSubdirectoriesAndFiles);
             foreach (FileSystemAccessRule rule in acl.GetAccessRules(true,true,typeof(SecurityIdentifier)))
-                if (rule.AccessControlType == AccessControlType.Allow && !allowed.Contains(rule.IdentityReference.Value) && (rule.FileSystemRights & writes) != 0)
+                if ((rule.PropagationFlags & PropagationFlags.InheritOnly) == 0 && rule.AccessControlType == AccessControlType.Allow && !allowed.Contains(rule.IdentityReference.Value) && (rule.FileSystemRights & writes) != 0)
                     throw new UnauthorizedAccessException("Helper path is writable by an untrusted identity");
         }
     }
-    private static async Task<JsonElement> Invoke(string helper, object input, CancellationToken token)
+    internal static async Task<JsonElement> Invoke(string helper, object input, CancellationToken token)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
         timeout.CancelAfter(TimeSpan.FromSeconds(45));

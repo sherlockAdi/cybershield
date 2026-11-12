@@ -40,7 +40,7 @@ internal static class Program
     }
 }
 
-internal sealed record AgentOptions(Uri Api, Guid ServerId, string StateDirectory, string? TokenFile, bool Once, string? EventsFile, string? ManagementHelper)
+internal sealed record AgentOptions(Uri Api, Guid ServerId, string StateDirectory, string? TokenFile, bool Once, string? EventsFile, string? ManagementHelper, string? DeviceAuditHelper)
 {
     public static AgentOptions Parse(string[] args)
     {
@@ -49,7 +49,7 @@ internal sealed record AgentOptions(Uri Api, Guid ServerId, string StateDirector
         for (var index = 0; index < args.Length; index++)
         {
             if (args[index] is "--once" or "--allow-loopback-http") { if (!flags.Add(args[index])) throw new ArgumentException("Duplicate flag"); continue; }
-            if (args[index] is not ("--api" or "--server-id" or "--state-dir" or "--token-file" or "--events-file" or "--management-helper") || index + 1 >= args.Length) throw new ArgumentException("Unsupported argument");
+            if (args[index] is not ("--api" or "--server-id" or "--state-dir" or "--token-file" or "--events-file" or "--management-helper" or "--device-audit-helper") || index + 1 >= args.Length) throw new ArgumentException("Unsupported argument");
             if (!values.TryAdd(args[index], args[++index])) throw new ArgumentException("Duplicate argument");
         }
         if (!values.TryGetValue("--api", out var rawOrigin) || !Uri.TryCreate(rawOrigin, UriKind.Absolute, out var origin)) throw new ArgumentException("An API origin is required");
@@ -59,7 +59,7 @@ internal sealed record AgentOptions(Uri Api, Guid ServerId, string StateDirector
         if (!values.TryGetValue("--server-id", out var rawServerId) || !Guid.TryParse(rawServerId, out var serverId)) throw new ArgumentException("A server UUID is required");
         var directory = Path.GetFullPath(values.GetValueOrDefault("--state-dir") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ServerGuard", "Agent"));
         if (directory.TrimEnd(Path.DirectorySeparatorChar) == Path.GetPathRoot(directory)?.TrimEnd(Path.DirectorySeparatorChar)) throw new ArgumentException("State directory cannot be a drive root");
-        return new AgentOptions(origin, serverId, directory, values.GetValueOrDefault("--token-file"), flags.Contains("--once"), values.GetValueOrDefault("--events-file"), values.GetValueOrDefault("--management-helper"));
+        return new AgentOptions(origin, serverId, directory, values.GetValueOrDefault("--token-file"), flags.Contains("--once"), values.GetValueOrDefault("--events-file"), values.GetValueOrDefault("--management-helper"), values.GetValueOrDefault("--device-audit-helper"));
     }
 }
 
@@ -248,6 +248,7 @@ internal sealed class AgentWorker(AgentOptions options, ILogger<AgentWorker> log
     private async Task RunWindows(CancellationToken cancellationToken)
     {
         if (options.ManagementHelper is not null) { Management.ValidateHelper(options.ManagementHelper); Management.ValidateHelper(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ServerGuard", "management.json")); }
+        if (options.DeviceAuditHelper is not null) Management.ValidateHelper(options.DeviceAuditHelper);
         using var store = new StateStore(options);
         using var handler = new HttpClientHandler { AllowAutoRedirect = false, SslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13 };
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15), BaseAddress = options.Api };
@@ -275,7 +276,7 @@ internal sealed class AgentWorker(AgentOptions options, ILogger<AgentWorker> log
                 if (state.Sequence >= 9007199254740991) throw new InvalidOperationException("Sequence exhausted; new enrollment required");
                 state.Sequence++;
                 store.Save();
-                var heartbeat = await Send(client, store.Key, "/api/agent/v1/heartbeat", new { schemaVersion = 1, serverId = state.ServerId, credentialId = state.CredentialId, sequence = state.Sequence, hostname = Environment.MachineName, os = "WINDOWS", osVersion = OSVersion(), agentVersion = "0.9.0-management", uptimeSeconds = Math.Max(0, Environment.TickCount64 / 1000), inventory = new { architecture = RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(), logicalCpuCount = Environment.ProcessorCount }, metrics = collector.Collect(), management = await Management.Report(options,state,cancellationToken) }, cancellationToken);
+                var heartbeat = await Send(client, store.Key, "/api/agent/v1/heartbeat", new { schemaVersion = 1, serverId = state.ServerId, credentialId = state.CredentialId, sequence = state.Sequence, hostname = Environment.MachineName, os = "WINDOWS", osVersion = OSVersion(), agentVersion = "0.9.0-management", uptimeSeconds = Math.Max(0, Environment.TickCount64 / 1000), inventory = new { architecture = RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(), logicalCpuCount = Environment.ProcessorCount }, metrics = collector.Collect(), management = await Management.Report(options,state,cancellationToken), deviceAudit = await DeviceAudit.Report(options,cancellationToken) }, cancellationToken);
                 if (!heartbeat.GetProperty("accepted").GetBoolean() || heartbeat.GetProperty("serverId").GetString() != state.ServerId || heartbeat.GetProperty("acceptedSequence").GetInt64() != state.Sequence) throw new InvalidOperationException("Heartbeat response mismatch");
                 await Management.Execute(options,store,heartbeat,cancellationToken);
                 var interval = heartbeat.GetProperty("heartbeatIntervalSeconds").GetInt32();

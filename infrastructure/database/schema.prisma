@@ -209,6 +209,10 @@ model Invitation {
 }
 
 model Server {
+  device_config Json?
+  device_revision Int @default(0)
+  device_snapshot Json?
+  device_received_at DateTime? @db.Timestamptz(3)
   management_snapshot Json?
   management_received_at DateTime? @db.Timestamptz(3)
   host_commands HostCommand[]

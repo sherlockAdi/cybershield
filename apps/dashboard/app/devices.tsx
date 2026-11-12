@@ -1,0 +1,69 @@
+'use client';
+import { useEffect, useState, type FormEvent } from 'react';
+import { api } from '../lib/api';
+import HostManagement from './host-management';
+
+type Config = { employeeId: string | null; notes: string; storage: string; approvedStorageIds: string[]; bluetooth: string; mtp: string; printers: string; usbNetwork: string; screenLockMinutes: number; requireFirewall: boolean; requireAntivirus: boolean; requireEncryption: boolean };
+type Device = { id: string; hostname: string; status: string; device_config: Config; device_revision: number; device_received_at: string | null; device_snapshot?: { sections: Record<string, { status: string; data: unknown; error: string | null }> }; };
+type Enrollment = { serverId: string; enrollmentToken: string; expiresAt: string };
+const message = (e: unknown) => e instanceof Error ? e.message : 'Request failed';
+
+export default function Devices({ organizationId, canManage }: { organizationId: string; canManage: boolean }) {
+  const [items, setItems] = useState<Device[]>([]), [page, setPage] = useState(1), [next, setNext] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null), [error, setError] = useState(''), [busy,setBusy] = useState(false);
+  const [enrollment,setEnrollment] = useState<Enrollment | null>(null), [refresh,setRefresh] = useState(0);
+  const base = `/organizations/${organizationId}`;
+  useEffect(() => {
+    let active=true;
+    const load = async () => { try { const result=await api<{items:Device[];hasNext:boolean}>(`${base}/devices?page=${page}`); if(active){setItems(result.items);setNext(result.hasNext);setError('');} } catch(e){if(active){setItems([]);setError(message(e));}} };
+    void load(); const timer=setInterval(()=>{if(!document.hidden)void load();},10000);
+    return ()=>{active=false;clearInterval(timer);};
+  },[base,page,refresh]);
+  async function register(e:FormEvent<HTMLFormElement>){
+    e.preventDefault();const hostname=new FormData(e.currentTarget).get('hostname');setBusy(true);setError('');setEnrollment(null);
+    try{setEnrollment(await api<Enrollment>(`${base}/servers`,'POST',{hostname,os:'WINDOWS',device:true}));setPage(1);setRefresh(n=>n+1);}catch(e){setError(message(e));}finally{setBusy(false);}
+  }
+  if(selected)return <DeviceDetail key={selected} base={base} id={selected} canManage={canManage} back={()=>{setSelected(null);setRefresh(n=>n+1);}} />;
+  return <>
+    <div className="info-note"><p>Register a Windows laptop without an employee account. Configuration is saved as a draft; USB, account and baseline enforcement is not enabled in this release.</p></div>
+    {error&&<p role="alert" className="message error">{error}</p>}
+    {canManage&&<form className="inventory-filters" onSubmit={register}><input name="hostname" aria-label="Device name" placeholder="OFFICE-LAPTOP-01" required maxLength={253} pattern="[A-Za-z0-9][A-Za-z0-9._-]*"/><button className="button primary" disabled={busy}>Register Windows device</button></form>}
+    {enrollment&&<EnrollmentInfo value={enrollment} close={()=>setEnrollment(null)}/>}
+    <section className="panel"><div className="panel-heading"><h2>Devices</h2><button className="button secondary" onClick={()=>setRefresh(n=>n+1)}>Refresh</button></div><div className="table-wrap"><table><thead><tr><th>Device</th><th>Agent status</th><th>Assignment</th><th>Policy</th><th>Last audit</th></tr></thead><tbody>{items.map(device=><tr key={device.id}><td><button className="text-button" onClick={()=>{setEnrollment(null);setSelected(device.id);}}>{device.hostname}</button></td><td>{device.status.replaceAll('_',' ')}</td><td>{device.device_config.employeeId?'Assigned':'Unassigned'}</td><td>Draft · not applied</td><td>{device.device_received_at?new Date(device.device_received_at).toLocaleString():'Not reported'}</td></tr>)}</tbody></table>{!items.length&&<p className="empty">No devices on this page. Employee registration is optional.</p>}</div></section>
+    <div className="pagination-bar"><span>Page {page} · 10 devices per page</span><div className="button-row"><button className="button secondary" disabled={page===1} onClick={()=>setPage(p=>p-1)}>Previous</button><button className="button secondary" disabled={!next} onClick={()=>setPage(p=>p+1)}>Next 10</button></div></div>
+  </>;
+}
+function EnrollmentInfo({value,close}:{value:Enrollment;close:()=>void}){
+  return <section className="panel"><div className="panel-heading"><h2>Install Windows service</h2><button className="button secondary" onClick={close}>Hide token</button></div><div className="section-gap">
+    <p>Device ID: <code>{value.serverId}</code></p><p>One-time enrollment token (expires {new Date(value.expiresAt).toLocaleString()}):</p><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{value.enrollmentToken}</pre>
+    <ol><li>Download or build the Windows package from <a href="https://github.com/sherlockAdi/cybershield-device-agent" target="_blank" rel="noreferrer">the device-agent repository</a>.</li><li>Open administrator PowerShell in the extracted package directory.</li><li>Run the installer below. Paste the token only at its secure prompt.</li><li>Wait for an ONLINE heartbeat. Open the device to review its audit.</li></ol>
+    <pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{`.\\Install-Service.ps1 -Api '${typeof window==='undefined'?'https://your-control-plane':window.location.origin}' -DeviceId '${value.serverId}'`}</pre>
+    <p>Service installation needs owner permission and administrator access. Do not enroll interactively first: the service owns its DPAPI identity. Credentials expire after 30 days; see repository renewal instructions.</p>
+  </div></section>;
+}
+function DeviceDetail({base,id,canManage,back}:{base:string;id:string;canManage:boolean;back:()=>void}){
+  const [device,setDevice]=useState<Device|null>(null),[tab,setTab]=useState('Overview'),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
+  const [members,setMembers]=useState<{id:string;name:string;email:string}[]>([]),[enrollment,setEnrollment]=useState<Enrollment|null>(null);
+  async function load(){setDevice(await api<Device>(`${base}/devices/${id}`));}
+  useEffect(()=>{let active=true;void Promise.all([api<Device>(`${base}/devices/${id}`),api<typeof members>(`${base}/members`)]).then(([d,m])=>{if(active){setDevice(d);setMembers(m);}}).catch(e=>{if(active)setError(message(e));});return()=>{active=false;};},[base,id]);
+  async function save(e:FormEvent<HTMLFormElement>){e.preventDefault();if(!device)return;const f=new FormData(e.currentTarget);setBusy(true);setNotice('');setError('');
+    const config={employeeId:f.get('employeeId')||null,notes:f.get('notes'),storage:f.get('storage'),approvedStorageIds:String(f.get('approvedStorageIds')||'').split('\n').map(s=>s.trim()).filter(Boolean),bluetooth:f.get('bluetooth'),mtp:f.get('mtp'),printers:f.get('printers'),usbNetwork:f.get('usbNetwork'),screenLockMinutes:Number(f.get('screenLockMinutes')),requireFirewall:f.has('requireFirewall'),requireAntivirus:f.has('requireAntivirus'),requireEncryption:f.has('requireEncryption')};
+    try{await api(`${base}/devices/${id}`,'PATCH',{revision:device.device_revision,config});await load();setNotice('Draft saved. No Windows policy has been applied.');}catch(e){setError(message(e));}finally{setBusy(false);}}
+  async function lifecycle(action:string){if(action==='revoke'&&!confirm('Revoke device credentials? Reporting will stop; this does not uninstall the service.'))return;setBusy(true);setError('');setEnrollment(null);try{const value=await api<Enrollment>(`${base}/servers/${id}/${action}`,'POST',{});if(action==='enrollment')setEnrollment(value);else setNotice('Device credentials revoked.');}catch(e){setError(message(e));}finally{setBusy(false);}}
+  return <><button className="button secondary" onClick={back}>Back to devices</button><h2>{device?.hostname||'Loading device…'}</h2>{error&&<p role="alert" className="message error">{error}</p>}{notice&&<p role="status" className="message success">{notice}</p>}
+    <div className="tabs">{['Overview','Configuration','Security audit','Applications','IP access','Action history','Enrollment'].map(t=><button key={t} className={tab===t?'active':''} onClick={()=>{setEnrollment(null);setTab(t);}}>{t}</button>)}</div>
+    {device&&tab==='Overview'&&<section className="panel device-summary"><p>Device ID: <code>{id}</code></p><p>Employee: {members.find(m=>m.id===device.device_config.employeeId)?.email||'Unassigned / member unavailable'}</p><p>Policy revision: {device.device_revision} · Draft, not applied</p><p>Last audit: {device.device_received_at?new Date(device.device_received_at).toLocaleString():'Not reported'}</p><p>Audit reports are observations, not proof of enforcement. Review their age before relying on them.</p></section>}
+    {device&&tab==='Configuration'&&<form key={device.device_revision} className="panel device-config" onSubmit={save}><fieldset disabled={!canManage||busy}><legend>Desired configuration · draft only</legend><p>These settings do not yet enforce USB, peripherals, user privileges or encryption on Windows.</p>
+      <label>Employee<select name="employeeId" defaultValue={device.device_config.employeeId||''}><option value="">Unassigned</option>{device.device_config.employeeId&&!members.some(m=>m.id===device.device_config.employeeId)&&<option value={device.device_config.employeeId}>Previously assigned member (unavailable)</option>}{members.map(m=><option key={m.id} value={m.id}>{m.name} · {m.email}</option>)}</select></label>
+      <label>Storage policy<select name="storage" defaultValue={device.device_config.storage}>{['AUDIT','BLOCK','READ_ONLY','ALLOWLIST'].map(v=><option key={v}>{v}</option>)}</select></label>
+      <label>Approved storage instance IDs (one per line)<textarea name="approvedStorageIds" defaultValue={device.device_config.approvedStorageIds.join('\n')} rows={4}/></label>
+      {(['bluetooth','mtp','printers','usbNetwork'] as const).map(k=><label key={k}>{({bluetooth:'Bluetooth',mtp:'Phone / MTP',printers:'Printers',usbNetwork:'USB network adapters'})[k]}<select name={k} defaultValue={device.device_config[k]}><option>AUDIT</option><option>BLOCK</option></select></label>)}
+      <label>Screen-lock minutes<input name="screenLockMinutes" type="number" min={1} max={60} required defaultValue={device.device_config.screenLockMinutes}/></label>
+      {(['requireFirewall','requireAntivirus','requireEncryption'] as const).map(k=><label key={k}><input name={k} type="checkbox" defaultChecked={device.device_config[k]}/>{({requireFirewall:'Require firewall',requireAntivirus:'Require antivirus',requireEncryption:'Require disk encryption'})[k]}</label>)}
+      <label>Administrator notes<textarea name="notes" maxLength={1000} defaultValue={device.device_config.notes}/></label><p>Keyboard/mouse stay outside this draft. Employee standard-user conversion and recovery-admin setup require a separate verified local procedure.</p><button className="button primary" disabled={busy}>Save draft configuration</button>
+    </fieldset></form>}
+    {device&&tab==='Security audit'&&<section className="panel device-summary"><button className="button secondary" onClick={()=>void load().catch(e=>setError(message(e)))}>Refresh audit</button><p>{device.device_received_at?`Received ${new Date(device.device_received_at).toLocaleString()} · ${Date.now()-Date.parse(device.device_received_at)>300000?'STALE':'Recent'}`:'No signed device audit received yet'}</p>{Object.entries(device.device_snapshot?.sections||{}).map(([name,section])=><details key={name}><summary>{name} · {section.status}</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{JSON.stringify(section,null,2)}</pre></details>)}</section>}
+    {['Applications','IP access','Action history'].includes(tab)&&<HostManagement os="WINDOWS" organizationId={base.split('/')[2]} serverId={id} canManage={canManage} onError={e=>setError(message(e))} view={tab==='Applications'?'applications':tab==='IP access'?'access':'history'}/>}
+    {tab==='Enrollment'&&<section className="panel device-summary"><p>Enrollment tokens expire after ten minutes. Revoke stops control-plane access; it does not undo local policies or remove the service.</p>{canManage&&<div className="button-row"><button disabled={busy} className="button primary" onClick={()=>void lifecycle('enrollment')}>Generate enrollment token</button><button disabled={busy} className="button secondary" onClick={()=>void lifecycle('revoke')}>Revoke device access</button></div>}{enrollment&&<EnrollmentInfo value={enrollment} close={()=>setEnrollment(null)}/>}</section>}
+  </>;
+}

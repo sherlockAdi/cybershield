@@ -15,6 +15,7 @@ import { RolloutService } from './rollouts';
 import { DetectionService } from './detections';
 import { HostManagementService } from './host-management';
 import { ActivityService } from './activity';
+import { DeviceService } from './devices';
 import { DocumentService } from './documents';
 
 @Catch()
@@ -30,7 +31,7 @@ class SafeErrors implements ExceptionFilter {
 
 @Controller('api')
 class ApiController {
-  constructor(@Inject(DocumentService) private readonly documents: DocumentService, @Inject(HostManagementService) private readonly management: HostManagementService, @Inject(ControlService) private readonly service: ControlService, @Inject(AgentService) private readonly agents: AgentService, @Inject(TelemetryService) private readonly telemetry: TelemetryService, @Inject(FirewallService) private readonly firewall: FirewallService, @Inject(RolloutService) private readonly rollouts: RolloutService, @Inject(DetectionService) private readonly detections: DetectionService, @Inject(ActivityService) private readonly activity: ActivityService) {}
+  constructor(@Inject(DeviceService) private readonly devices: DeviceService, @Inject(DocumentService) private readonly documents: DocumentService, @Inject(HostManagementService) private readonly management: HostManagementService, @Inject(ControlService) private readonly service: ControlService, @Inject(AgentService) private readonly agents: AgentService, @Inject(TelemetryService) private readonly telemetry: TelemetryService, @Inject(FirewallService) private readonly firewall: FirewallService, @Inject(RolloutService) private readonly rollouts: RolloutService, @Inject(DetectionService) private readonly detections: DetectionService, @Inject(ActivityService) private readonly activity: ActivityService) {}
   @Get('organizations/:id/servers/:serverId/activity') async serverActivity(@Req() request: Request, @Param('id') id: string, @Param('serverId') serverId: string, @Query() query: unknown) { return this.activity.report(await this.service.authenticate(request), id, serverId, query); }
 
   @Get('organizations/:id/security/settings') async detectionSettings(@Req() request: Request, @Param('id') id: string) { return this.detections.config(await this.service.authenticate(request), id); }
@@ -72,6 +73,9 @@ class ApiController {
   @Delete('organizations/:id/documents/:doc/links/:link') async revokeDocumentLink(@Req() req: Request, @Param('id') id: string, @Param('doc') doc: string, @Param('link') link: string) { return this.documents.revoke(await this.service.authenticate(req),id,doc,link); }
   @Post('documents/public') async publicDocument(@Body() body: unknown) { return this.documents.publicRead(body); }
 
+  @Get('organizations/:id/devices') async deviceList(@Req() req: Request, @Param('id') id: string, @Query() query: unknown) { return this.devices.list(await this.service.authenticate(req),id,query); }
+  @Get('organizations/:id/devices/:device') async deviceDetail(@Req() req: Request, @Param('id') id: string, @Param('device') device: string) { return this.devices.read(await this.service.authenticate(req),id,device); }
+  @Patch('organizations/:id/devices/:device') async deviceSave(@Req() req: Request, @Param('id') id: string, @Param('device') device: string, @Body() body: unknown) { return this.devices.save(await this.service.authenticate(req),id,device,body); }
   @Get('health') health() { return { status: 'ok', milestone: 'week-8-detections', database: this.service.db.mode }; }
   @Post('agent/v1/events') ingestEvents(@Req() request: AgentRequest) { return this.telemetry.ingest(request); }
   @Get('organizations/:id/inventory') async inventory(@Req() request: Request, @Param('id') id: string, @Query() query: unknown) { return this.telemetry.inventory(await this.service.authenticate(request), id, query); }
@@ -112,7 +116,7 @@ class ApiController {
 
 export async function createApp(database?: Database) {
   const db = database || await new Database().open();
-  @Module({ controllers: [ApiController], providers: [{ provide: Database, useValue: db }, ControlService, AgentService, TelemetryService, FirewallService, RolloutService, DetectionService, ActivityService, HostManagementService, DocumentService] })
+  @Module({ controllers: [ApiController], providers: [{ provide: Database, useValue: db }, ControlService, AgentService, TelemetryService, FirewallService, RolloutService, DetectionService, ActivityService, HostManagementService, DocumentService, DeviceService] })
   class AppModule {}
   const app = await NestFactory.create(AppModule, { logger: ['error', 'warn'], bodyParser: false });
   app.use(helmet());
