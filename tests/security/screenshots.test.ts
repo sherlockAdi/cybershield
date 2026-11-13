@@ -6,7 +6,7 @@ import {ControlService,Actor} from '../../apps/api/src/service';
 import {AgentService,AgentRequest,signingMessage} from '../../apps/api/src/agents';
 import {ScreenshotService} from '../../apps/api/src/screenshots';
 
-test('screenshots default off, require privileged settings, signed fresh uploads, exact revisions and encrypted latest-only storage',async()=>{
+test('screenshots require signed uploads and admin access and retain encrypted history for 72 hours',async()=>{
  const db=await new Database().open(true),control=new ControlService(db),agents=new AgentService(db,control),screens=new ScreenshotService(db,control,agents);
  const org=randomUUID(),other=randomUUID(),owner=randomUUID(),viewer=randomUUID(),outsider=randomUUID(),credential=randomUUID();
  const actor={id:owner} as Actor,pair=generateKeyPairSync('ec',{namedCurve:'prime256v1'});
@@ -45,6 +45,12 @@ test('screenshots default off, require privileged settings, signed fresh uploads
   assert.equal((await screens.read(actor,org,id)).jpeg,null,'old frame is hidden');
   await screens.configure(actor,org,id,{enabled:false,intervalSeconds:5,revision:2});
   assert.equal((await db.query('SELECT screen_ciphertext FROM servers WHERE id=$1',[id])).rows[0].screen_ciphertext,null);
+  const date=new Date(Date.now()+19800000).toISOString().slice(0,10);
+  assert.equal((await screens.history(actor,org,id,{date})).items.length,2);
+  await assert.rejects(screens.history({id:viewer} as Actor,org,id,{date}));
+  await db.query("UPDATE device_screenshots SET captured_at=now()-interval '73 hours' WHERE server_id=$1",[id]);
+  const expiredDate=new Date(Date.now()+19800000-73*3600000).toISOString().slice(0,10);
+  assert.equal((await screens.history(actor,org,id,{date:expiredDate})).items.length,0);
   await assert.rejects(screens.ingest(request(3,3)),/disabled/);
   await screens.configure(actor,org,id,{enabled:true,intervalSeconds:10,revision:3});
   await db.query("UPDATE memberships SET role='VIEWER' WHERE organization_id=$1 AND user_id=$2",[org,owner]);

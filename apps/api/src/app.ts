@@ -81,6 +81,10 @@ class ApiController {
   @Get('organizations/:id/devices/:device/screenshots') async screenshotRead(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Param('id') id: string, @Param('device') device: string) { res.setHeader('Cache-Control','no-store'); return this.screenshots.read(await this.service.authenticate(req),id,device); }
   @Patch('organizations/:id/devices/:device/screenshots') async screenshotConfig(@Req() req: Request, @Param('id') id: string, @Param('device') device: string, @Body() body: unknown) { return this.screenshots.configure(await this.service.authenticate(req),id,device,body); }
   @Post('agent/v1/screenshot') async screenshotUpload(@Req() req: AgentRequest) { return this.screenshots.ingest(req); }
+  @Get('organizations/:id/devices/:device/screenshots/history') async screenshotHistory(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Param('id') id: string, @Param('device') device: string, @Query() query: unknown) {
+    res.setHeader('Cache-Control','no-store');
+    return this.screenshots.history(await this.service.authenticate(req),id,device,query);
+  }
   @Get('health') health() { return { status: 'ok', milestone: 'week-8-detections', database: this.service.db.mode }; }
   @Post('agent/v1/events') ingestEvents(@Req() request: AgentRequest) { return this.telemetry.ingest(request); }
   @Get('organizations/:id/inventory') async inventory(@Req() request: Request, @Param('id') id: string, @Query() query: unknown) { return this.telemetry.inventory(await this.service.authenticate(request), id, query); }

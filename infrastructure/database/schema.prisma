@@ -250,9 +250,23 @@ model Server {
   targets             DeploymentTarget[]
   events              SecurityEvent[]
   metric_samples      MetricSample[]
+  screenshots         DeviceScreenshot[]
   @@unique([organization_id, id])
   @@index([organization_id, last_heartbeat_at])
   @@map("servers")
+}
+
+model DeviceScreenshot {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String   @db.Uuid
+  server_id       String   @db.Uuid
+  captured_at     DateTime @db.Timestamptz(6)
+  ciphertext      String
+  server          Server   @relation(fields: [organization_id, server_id], references: [organization_id, id], onDelete: Cascade)
+
+  @@index([organization_id, server_id, captured_at(sort: Desc), id(sort: Desc)], map: "device_screenshots_device_date")
+  @@index([captured_at], map: "device_screenshots_expiry")
+  @@map("device_screenshots")
 }
 
 model ServerGroup {

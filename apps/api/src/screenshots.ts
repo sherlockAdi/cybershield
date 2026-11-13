@@ -6,6 +6,7 @@ import { ControlService, Actor } from './service';
 import { AgentService, AgentRequest } from './agents';
 import { input, uuid } from './input';
 import { mfaKey } from './config';
+import { indiaDay } from './activity';
 const intervals=z.union([z.literal(1),z.literal(5),z.literal(10),z.literal(15)]);
 const upload=z.object({schemaVersion:z.literal(1),serverId:uuid,credentialId:uuid,sequence:z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),revision:z.number().int().min(1),capturedAt:z.string().datetime({offset:true}),jpeg:z.string().min(8).max(128000).regex(/^[A-Za-z0-9+/]+={0,2}$/)}).strict();
 function key(org:string,id:string){return Buffer.from(hkdfSync('sha256',mfaKey,Buffer.from(org),Buffer.from(`device-screenshot:${id}`),32));}
@@ -15,8 +16,31 @@ function open(org:string,id:string,value:string){const bytes=Buffer.from(value,'
 export class ScreenshotService implements OnModuleInit,OnModuleDestroy {
  private cleanup?:ReturnType<typeof setInterval>;
  constructor(@Inject(Database) private readonly db:Database,@Inject(ControlService) private readonly control:ControlService,@Inject(AgentService) private readonly agents:AgentService){}
- onModuleInit(){this.cleanup=setInterval(()=>{void this.db.query("UPDATE servers SET screen_ciphertext=NULL,screen_captured_at=NULL WHERE screen_ciphertext IS NOT NULL AND screen_received_at<now()-interval '5 minutes'").catch(()=>{});},60000);this.cleanup.unref();}
+ onModuleInit(){
+  const prune=()=>{
+   void this.db.query("UPDATE servers SET screen_ciphertext=NULL,screen_captured_at=NULL WHERE screen_ciphertext IS NOT NULL AND screen_received_at<now()-interval '5 minutes'").catch(()=>{});
+   void this.db.query("DELETE FROM device_screenshots WHERE captured_at<now()-interval '72 hours'").catch(()=>{});
+  };
+  prune();
+  this.cleanup=setInterval(prune,60000);
+  this.cleanup.unref();
+ }
  onModuleDestroy(){if(this.cleanup)clearInterval(this.cleanup);}
+ async history(actor:Actor,org:string,id:string,query:unknown){
+  await this.control.membership(this.db,org,actor,['OWNER','ADMIN']);
+  const {date,before}=input(z.object({date:z.string(),before:uuid.optional()}).strict(),query);
+  const day=indiaDay(date);
+  const device=await this.db.query('SELECT id FROM servers WHERE organization_id=$1 AND id=$2 AND device_config IS NOT NULL',[org,input(uuid,id)]);
+  if(!device.rows.length)throw new NotFoundException('Device not found');
+  const rows=(await this.db.query(`SELECT id,captured_at,ciphertext FROM device_screenshots
+   WHERE organization_id=$1 AND server_id=$2 AND captured_at >= $3 AND captured_at < $4
+   AND captured_at >= now()-interval '72 hours'
+   AND ($5::uuid IS NULL OR (captured_at,id) < (SELECT captured_at,id FROM device_screenshots WHERE organization_id=$1 AND server_id=$2 AND id=$5))
+   ORDER BY captured_at DESC,id DESC LIMIT 13`,[org,id,day.start,day.end,before??null])).rows;
+  const page=rows.slice(0,12);
+  if(page.length)await this.control.audit(this.db,org,actor.id,'device.screenshot_history_viewed',id,{date});
+  return {items:page.map(row=>({id:row.id,capturedAt:row.captured_at,jpeg:open(org,id,row.ciphertext)})),next:rows.length>12?page.at(-1)!.id:null};
+ }
  async read(actor:Actor,org:string,id:string){
   await this.control.membership(this.db,org,actor,['OWNER','ADMIN']);
   const row=(await this.db.query('SELECT screen_config,screen_ciphertext,screen_captured_at,screen_received_at FROM servers WHERE organization_id=$1 AND id=$2 AND device_config IS NOT NULL',[org,input(uuid,id)])).rows[0];
@@ -50,7 +74,9 @@ export class ScreenshotService implements OnModuleInit,OnModuleDestroy {
    if(!authorized.rows.length)throw new ConflictException('Screenshot requester is no longer authorized');
    if(row.screen_received_at&&Date.now()-new Date(row.screen_received_at).getTime()<row.screen_config.intervalSeconds*800)throw new ConflictException('Screenshot interval not reached');
    await client.query('UPDATE agent_credentials SET last_sequence=$2 WHERE id=$1',[data.credentialId,data.sequence]);
-   await client.query('UPDATE servers SET screen_ciphertext=$2,screen_captured_at=$3,screen_received_at=now() WHERE id=$1',[data.serverId,seal(server.organization_id,data.serverId,data.jpeg),data.capturedAt]);
+   const ciphertext=seal(server.organization_id,data.serverId,data.jpeg);
+   await client.query('INSERT INTO device_screenshots (organization_id,server_id,captured_at,ciphertext) VALUES ($1,$2,$3,$4)',[server.organization_id,data.serverId,data.capturedAt,ciphertext]);
+   await client.query('UPDATE servers SET screen_ciphertext=$2,screen_captured_at=$3,screen_received_at=now() WHERE id=$1',[data.serverId,ciphertext,data.capturedAt]);
    return {accepted:true,acceptedSequence:data.sequence};
   });
  }
