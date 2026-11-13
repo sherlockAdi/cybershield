@@ -104,6 +104,7 @@ enum DeliveryState {
 }
 
 model Organization {
+  employees Employee[]
   detection_config Json @default("{}")
   id            String   @id @default(uuid()) @db.Uuid
   name          String   @db.VarChar(120)
@@ -123,6 +124,19 @@ model Organization {
   outbox        OutboxEvent[]
   metric_samples MetricSample[]
   @@map("organizations")
+}
+
+model Employee {
+  id                  String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id     String @db.Uuid
+  name                String
+  email               String
+  aadhaar_reviewed_at DateTime? @db.Timestamptz(6)
+  pan_reviewed_at     DateTime? @db.Timestamptz(6)
+  organization        Organization @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([organization_id, email])
+  @@map("employees")
 }
 
 model User {

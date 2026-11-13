@@ -1,3 +1,4 @@
+import { EmployeeService } from './employees';
 import 'reflect-metadata';
 import { Body, Controller, Get, Post, Patch, Delete, Param, Query, Req, Res, Inject, Module, HttpException, Catch, ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -33,7 +34,10 @@ class SafeErrors implements ExceptionFilter {
 
 @Controller('api')
 class ApiController {
-  constructor(@Inject(ScreenshotService) private readonly screenshots: ScreenshotService, @Inject(DeviceService) private readonly devices: DeviceService, @Inject(DocumentService) private readonly documents: DocumentService, @Inject(HostManagementService) private readonly management: HostManagementService, @Inject(ControlService) private readonly service: ControlService, @Inject(AgentService) private readonly agents: AgentService, @Inject(TelemetryService) private readonly telemetry: TelemetryService, @Inject(FirewallService) private readonly firewall: FirewallService, @Inject(RolloutService) private readonly rollouts: RolloutService, @Inject(DetectionService) private readonly detections: DetectionService, @Inject(ActivityService) private readonly activity: ActivityService) {}
+  constructor(@Inject(EmployeeService) private readonly employees: EmployeeService, @Inject(ScreenshotService) private readonly screenshots: ScreenshotService, @Inject(DeviceService) private readonly devices: DeviceService, @Inject(DocumentService) private readonly documents: DocumentService, @Inject(HostManagementService) private readonly management: HostManagementService, @Inject(ControlService) private readonly service: ControlService, @Inject(AgentService) private readonly agents: AgentService, @Inject(TelemetryService) private readonly telemetry: TelemetryService, @Inject(FirewallService) private readonly firewall: FirewallService, @Inject(RolloutService) private readonly rollouts: RolloutService, @Inject(DetectionService) private readonly detections: DetectionService, @Inject(ActivityService) private readonly activity: ActivityService) {}
+  @Get('organizations/:id/employees') async employeeList(@Req() req: Request, @Param('id') id: string) { return this.employees.list(await this.service.authenticate(req), id); }
+  @Post('organizations/:id/employees') async employeeRegister(@Req() req: Request, @Param('id') id: string, @Body() body: unknown) { return this.employees.register(await this.service.authenticate(req), id, body); }
+  @Patch('organizations/:id/employees/:employee/review') async employeeReview(@Req() req: Request, @Param('id') id: string, @Param('employee') employee: string, @Body() body: unknown) { return this.employees.review(await this.service.authenticate(req), id, employee, body); }
   @Get('organizations/:id/servers/:serverId/activity') async serverActivity(@Req() request: Request, @Param('id') id: string, @Param('serverId') serverId: string, @Query() query: unknown) { return this.activity.report(await this.service.authenticate(request), id, serverId, query); }
 
   @Get('organizations/:id/security/settings') async detectionSettings(@Req() request: Request, @Param('id') id: string) { return this.detections.config(await this.service.authenticate(request), id); }
@@ -125,7 +129,7 @@ class ApiController {
 
 export async function createApp(database?: Database) {
   const db = database || await new Database().open();
-  @Module({ controllers: [ApiController], providers: [{ provide: Database, useValue: db }, ControlService, AgentService, TelemetryService, FirewallService, RolloutService, DetectionService, ActivityService, HostManagementService, DocumentService, DeviceService, ScreenshotService] })
+  @Module({ controllers: [ApiController], providers: [{ provide: Database, useValue: db }, ControlService, AgentService, TelemetryService, FirewallService, RolloutService, DetectionService, ActivityService, HostManagementService, DocumentService, DeviceService, ScreenshotService, EmployeeService] })
   class AppModule {}
   const app = await NestFactory.create(AppModule, { logger: ['error', 'warn'], bodyParser: false });
   app.use(helmet());
