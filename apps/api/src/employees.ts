@@ -10,7 +10,8 @@ export class EmployeeService {
 
   async list(actor: Actor, org: string) {
     await this.control.membership(this.db, org, actor, ['OWNER', 'ADMIN']);
-    return (await this.db.query(`SELECT e.id,e.name,e.email,e.aadhaar_reviewed_at,e.pan_reviewed_at,
+    return (await this.db.query(`SELECT e.id,e.name,e.email,e.phone,e.department,e.job_title,e.work_location,
+      e.employment_type,to_char(e.start_date,'YYYY-MM-DD') AS start_date,e.aadhaar_reviewed_at,e.pan_reviewed_at,
       CASE WHEN m.user_id IS NOT NULL AND u.disabled_at IS NOT NULL THEN 'Disabled' WHEN m.user_id IS NOT NULL THEN 'Active member'
       WHEN EXISTS (SELECT 1 FROM invitations i WHERE i.organization_id=e.organization_id AND i.email=e.email
         AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at>now()) THEN 'Invitation pending'
@@ -23,10 +24,24 @@ export class EmployeeService {
   }
 
   async register(actor: Actor, org: string, body: unknown) {
-    const data = input(z.object({ name: z.string().trim().min(1).max(120), email: z.string().trim().email().max(254).toLowerCase() }).strict(), body);
+    const optionalText = z.string().trim().min(1).max(120).optional();
+    const data = input(z.object({
+      name: z.string().trim().min(1).max(120),
+      email: z.string().trim().email().max(254).toLowerCase(),
+      phone: z.string().trim().regex(/^\+?[0-9][0-9 ()-]{5,24}$/).optional(),
+      department: optionalText,
+      job_title: optionalText,
+      work_location: optionalText,
+      employment_type: z.enum(['Full-time','Part-time','Contract','Intern']).optional(),
+      start_date: z.iso.date().refine(date => date >= '1900-01-01').optional(),
+    }).strict(), body);
     return this.db.transaction(async client => {
       await this.control.membership(client, org, actor, ['OWNER', 'ADMIN']);
-      const employee = (await client.query('INSERT INTO employees (organization_id,name,email) VALUES ($1,$2,$3) ON CONFLICT (organization_id,email) DO NOTHING RETURNING id', [org,data.name,data.email])).rows[0];
+      const employee = (await client.query(`INSERT INTO employees
+        (organization_id,name,email,phone,department,job_title,work_location,employment_type,start_date)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (organization_id,email) DO NOTHING RETURNING id`,
+        [org,data.name,data.email,data.phone ?? null,data.department ?? null,data.job_title ?? null,
+          data.work_location ?? null,data.employment_type ?? null,data.start_date ?? null])).rows[0];
       if (employee) await this.control.audit(client, org, actor.id, 'employee.registered', employee.id);
       return { created: Boolean(employee) };
     });

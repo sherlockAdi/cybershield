@@ -131,6 +131,12 @@ model Employee {
   organization_id     String @db.Uuid
   name                String
   email               String
+  phone               String?
+  department          String?
+  job_title           String?
+  work_location       String?
+  employment_type     String?
+  start_date          DateTime? @db.Date
   aadhaar_reviewed_at DateTime? @db.Timestamptz(6)
   pan_reviewed_at     DateTime? @db.Timestamptz(6)
   organization        Organization @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction)

@@ -4,17 +4,27 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../lib/api';
 
 type Employee = { id: string; name: string; email: string; aadhaar_reviewed_at: string | null; pan_reviewed_at: string | null; login_status: string; last_sign_in: string | null };
+const profileFields = [
+  ['phone', 'Phone number', 'tel'],
+  ['department', 'Department', 'text'],
+  ['job_title', 'Job title', 'text'],
+  ['work_location', 'Work location', 'text'],
+  ['start_date', 'Joining date', 'date'],
+] as const;
+type ProfileField = typeof profileFields[number][0] | 'employment_type';
+type EmployeeProfile = Employee & Record<ProfileField, string | null>;
 
 export default function Employees({ organizationId, openVault }: { organizationId: string; openVault: () => void }) {
   const endpoint = '/organizations/' + organizationId + '/employees';
-  const [rows, setRows] = useState<Employee[] | null>(null);
+  const [rows, setRows] = useState<EmployeeProfile[] | null>(null);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [invitation, setInvitation] = useState<{email: string; token: string} | null>(null);
 
   useEffect(() => {
     let active = true;
-    void api<Employee[]>(endpoint).then(value => { if (active) setRows(value); })
+    void api<EmployeeProfile[]>(endpoint).then(value => { if (active) setRows(value); })
       .catch(e => { if (active) setError(String(e.message)); });
     return () => { active = false; };
   }, [endpoint]);
@@ -22,9 +32,10 @@ export default function Employees({ organizationId, openVault }: { organizationI
   async function update(action: () => Promise<void>) {
     setBusy(true);
     setError('');
+    setNotice('');
     try {
       await action();
-      setRows(await api<Employee[]>(endpoint));
+      setRows(await api<EmployeeProfile[]>(endpoint));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to save employee details');
     } finally {
@@ -37,17 +48,28 @@ export default function Employees({ organizationId, openVault }: { organizationI
     const form = event.currentTarget;
     const values = new FormData(form);
     void update(async () => {
-      const result = await api<{ created: boolean }>(endpoint, 'POST', { name: values.get('name'), email: values.get('email') });
+      const details = Object.fromEntries(Array.from(values, ([key, value]) => [key, String(value).trim()]).filter(([, value]) => value));
+      const result = await api<{ created: boolean }>(endpoint, 'POST', details);
       if (!result.created) throw new Error('This email is already registered.');
       form.reset();
+      setNotice('Employee registered.');
     });
   }
 
   return <section className="panel settings-panel">
     <h2>Employee registration</h2>
     <form onSubmit={register}>
-      <label className="field"><span>Full name</span><input name="name" required maxLength={120} /></label>
-      <label className="field"><span>Work email</span><input name="email" type="email" required maxLength={254} /></label>
+      <h3>Contact details</h3>
+      <label className="field"><span>Full name (required)</span><input name="name" autoComplete="name" required maxLength={120} /></label>
+      <label className="field"><span>Work email (required)</span><input name="email" type="email" autoComplete="email" required maxLength={254} /></label>
+      <h3>Employee profile</h3>
+      {profileFields.map(([field, label, type]) => <label className="field" key={field}><span>{label}</span>
+        <input name={field} type={type} maxLength={type === 'tel' ? 25 : 120} min={type === 'date' ? '1900-01-01' : undefined} />
+      </label>)}
+      <label className="field"><span>Employment type</span><select name="employment_type">
+        <option value="">Select employment type</option>
+        {['Full-time', 'Part-time', 'Contract', 'Intern'].map(type => <option key={type}>{type}</option>)}
+      </select></label>
       <button className="button primary" disabled={busy}>Register employee</button>
     </form>
     <h2>Document verification</h2>
@@ -58,9 +80,14 @@ export default function Employees({ organizationId, openVault }: { organizationI
       <button className="button secondary" onClick={openVault}>Open encrypted document vault</button>
     </div>
     {error && <p role="alert" className="message error">{error}</p>}
+    {notice && <p role="status">{notice}</p>}
     {rows === null ? <p>Loading employees…</p> : rows.length === 0 ? <p>No employees registered.</p> :
       <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Workspace sign-in</th><th>Aadhaar review</th><th>PAN review</th></tr></thead>
-        <tbody>{rows.map(row => <tr key={row.id}><td>{row.name}<br />{row.email}</td>
+        <tbody>{rows.map(row => <tr key={row.id}><td>{row.name}<br />{row.email}
+          <details><summary>Employee profile</summary><dl>
+            {profileFields.map(([field,label]) => <div key={field}><dt>{label}</dt><dd>{row[field] || 'Not provided'}</dd></div>)}
+            <div><dt>Employment type</dt><dd>{row.employment_type || 'Not provided'}</dd></div>
+          </dl></details></td>
           <td>{row.login_status}<br />Last sign-in: {row.last_sign_in ? new Date(row.last_sign_in).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) + ' IST' : 'No record'}
             {row.login_status === 'No workspace access' && <><br /><button className="button secondary" disabled={busy || Boolean(invitation)} onClick={() => {
               void update(async () => {
