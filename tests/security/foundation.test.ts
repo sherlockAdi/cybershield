@@ -52,9 +52,9 @@ test('Week 1 migrations and Week 2 HTTP security acceptance', async suite => {
     return confirmation.data.recoveryCodes as string[];
   }
   try {
-    await suite.test('schema creates all 29 domain tables', async () => {
+    await suite.test('schema creates all 30 domain tables', async () => {
       const tables = await db.query("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name<>'_serverguard_migrations'");
-      assert.equal(tables.rows.length, 29);
+      assert.equal(tables.rows.length, 30);
       assert.equal((await anonymous.call('/health')).status, 200);
       assert.equal((await anonymous.call('/auth/me')).status, 401);
     });
