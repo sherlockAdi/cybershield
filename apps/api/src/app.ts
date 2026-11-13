@@ -130,7 +130,7 @@ export async function createApp(database?: Database) {
   app.use((request: Request, response: Response, next: NextFunction) => {
     response.setHeader('Cache-Control', 'no-store');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
-      const agentRequest = request.method === 'POST' && ['/api/agent/v1/enroll', '/api/agent/v1/heartbeat', '/api/agent/v1/events'].includes(request.originalUrl);
+      const agentRequest = request.method === 'POST' && ['/api/agent/v1/enroll', '/api/agent/v1/heartbeat', '/api/agent/v1/events', '/api/agent/v1/screenshot'].includes(request.originalUrl);
       if (agentRequest ? request.headers.origin !== undefined : request.headers.origin !== origin) { response.status(403).json({ message: 'Untrusted request origin' }); return; }
       if (!request.is('application/json') && request.method !== 'DELETE') { response.status(415).json({ message: 'Use application/json' }); return; }
       const now = Date.now();
