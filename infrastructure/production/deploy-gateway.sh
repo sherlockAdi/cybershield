@@ -8,6 +8,8 @@ if [[ ! ${SSH_ORIGINAL_COMMAND:-} =~ ^deploy\ ([0-9a-f]{40})$ ]]; then
   exit 64
 fi
 sha=${BASH_REMATCH[1]}
+component=${1:-full}
+case "$component" in full|frontend|backend) ;; *) exit 64 ;; esac
 base=/opt/cybershield360
 exec 9>"$base/private/deploy.lock"
 flock -w 1200 9
@@ -16,9 +18,21 @@ head -c 104857601 > "$release/source.tar"
 if [[ $(stat -c %s "$release/source.tar") -gt 104857600 ]]; then
   echo 'Release archive exceeds 100 MiB' >&2; exit 65
 fi
-python3 - "$release" <<'PY'
-import pathlib, sys, tarfile
+python3 - "$release" "$component" "$base" <<'PY'
+import pathlib, shutil, sys, tarfile
 root=pathlib.Path(sys.argv[1]); source=root/'source'; source.mkdir(mode=0o755)
+component=sys.argv[2]
+base=pathlib.Path(sys.argv[3])
+if component!='full':
+    revision=(base/'deployment/current-revision').read_text().strip()
+    import re
+    if not re.fullmatch('[0-9a-f]{40}',revision): raise SystemExit('Invalid deployed revision')
+    candidates=sorted((base/'releases').glob(f'ci-{revision[:12]}-*/source'), key=lambda p:p.stat().st_mtime)
+    if not candidates: raise SystemExit('Cannot locate current production source')
+    shutil.copytree(candidates[-1],source,dirs_exist_ok=True)
+    paths=['apps/dashboard'] if component=='frontend' else ['apps/api','infrastructure/database']
+    for name in paths:
+        shutil.rmtree(source/name)
 with tarfile.open(root/'source.tar') as archive:
     members=archive.getmembers()
     if sum(m.size for m in members)>200*1024*1024 or len(members)>20000: raise SystemExit('Archive exceeds limits')
@@ -26,6 +40,8 @@ with tarfile.open(root/'source.tar') as archive:
         path=pathlib.PurePosixPath(member.name)
         if path.is_absolute() or '..' in path.parts or not (member.isfile() or member.isdir()): raise SystemExit('Unsafe archive member')
         if any(p in ('.git','.env','node_modules') for p in path.parts): raise SystemExit('Forbidden archive member')
+        name=path.as_posix()
+        if component!='full' and not any(name==p or name.startswith(p+'/') or (member.isdir() and p.startswith(name+'/')) for p in paths): raise SystemExit('Archive exceeds component scope')
     archive.extractall(source, members=members, filter='data')
 # Source is repository code, never production secrets. Readable in the unprivileged image.
 for path in source.rglob('*'):
@@ -33,6 +49,9 @@ for path in source.rglob('*'):
 PY
 image="cybershield360:$sha"
 echo "Building frontend and backend: $sha"
+if [[ "$component" != full ]]; then
+  sed -i 's/pnpm install --frozen-lockfile/pnpm install --no-frozen-lockfile/' "$release/source/infrastructure/production/Dockerfile"
+fi
 docker build --label "org.opencontainers.image.revision=$sha" -f "$release/source/infrastructure/production/Dockerfile" -t "$image" "$release/source"
 compose="$base/deployment/compose.yaml"
 backup="$base/private/backups/deploy-${sha}-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -51,7 +70,9 @@ services:
 YAML
 compose_base=(docker compose --progress plain --env-file "$base/private/production.env" -f "$compose")
 echo 'Applying database migrations; old application remains running'
-"${compose_base[@]}" -f "$release/candidate.yaml" run --rm --no-deps migrate
+if [[ "$component" != frontend ]]; then
+  "${compose_base[@]}" -f "$release/candidate.yaml" run --rm --no-deps migrate
+fi
 # Only additive/backward-compatible migrations may ship automatically.
 # Database restores are deliberately manual: rollback must not discard user data.
 rollback() {
